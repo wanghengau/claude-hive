@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeRecordId } from './record-proxy.js';
 
 export interface RecordSummary {
   date: string;
