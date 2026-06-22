@@ -1,0 +1,22 @@
+{
+  "name": "server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "postinstall": "node -e \"const fs=require('fs'),path=require('path');const fix=d=>{if(!fs.existsSync(d))return;for(const p of fs.readdirSync(d)){const f=path.join(d,p,'spawn-helper');if(fs.existsSync(f))fs.chmodSync(f,0o755)}};try{fix(path.join('..','node_modules','node-pty','prebuilds'));fix(path.join('node_modules','node-pty','prebuilds'))}catch(e){}\""
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}
