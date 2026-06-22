@@ -153,4 +153,28 @@ describe('handleProxy', () => {
     expect(fs.existsSync(path.join(logDir, 'default'))).toBe(true);
     fs.rmSync(logDir, { recursive: true, force: true });
   });
+
+  it('响应超过 maxBytes 时标 truncated', async () => {
+    // mock 上游回一个大 body（>100 字节）；分多个小 chunk 发送，确保有 data 在 bytes 超过 maxBytes 后到达
+    const up = http.createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      for (let i = 0; i < 10; i++) res.write('x'.repeat(40));  // 共 400 字节，maxBytes=100 后续 chunk 触发 truncated
+      res.end();
+    });
+    const upPort = await listen(up);
+    const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rec-'));
+    // maxBytes 设 100，触发截断
+    const local = http.createServer((lreq, lres) => handleProxy(lreq, lres, { target: `http://127.0.0.1:${upPort}`, logDir, maxBytes: 100, injectWebsearch: false }));
+    const localPort = await listen(local);
+
+    await post(localPort, { 'content-type': 'application/json' }, JSON.stringify({ model: 'glm-5.2', messages: [] }));
+    await new Promise((r) => setTimeout(r, 100));
+    up.close(); local.close();
+
+    const dayDir = fs.readdirSync(path.join(logDir, 'default'))[0];
+    const file = fs.readdirSync(path.join(logDir, 'default', dayDir))[0];
+    const rec = JSON.parse(fs.readFileSync(path.join(logDir, 'default', dayDir, file), 'utf8'));
+    expect(rec.meta.truncated).toBe(true);
+    fs.rmSync(logDir, { recursive: true, force: true });
+  });
 });

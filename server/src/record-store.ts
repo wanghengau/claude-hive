@@ -91,5 +91,3 @@ export function getRecord(logDir: string, windowId: string, date: string, id: st
   const fp = path.join(logDir, wid, date, `${id}.json`);
   try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch { return null; }
 }
-
-export { makeRecordId };
