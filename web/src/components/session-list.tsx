@@ -7,6 +7,7 @@ interface Props {
   activeId: string | null;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
+  onShowRecord?: (id: string) => void;
 }
 
 const ROW_HEIGHT = 172;
@@ -19,7 +20,7 @@ function basename(p: string): string {
   return seg || p;
 }
 
-export function SessionList({ sessions, activeId, onSelect, onClose }: Props) {
+export function SessionList({ sessions, activeId, onSelect, onClose, onShowRecord }: Props) {
   const Row = ({ index, style }: { index: number; style: CSSProperties }) => {
     const s = sessions[index];
     const statusClass = s.exited ? 'st-exited' : s.running ? 'st-running' : 'st-idle';
@@ -30,6 +31,9 @@ export function SessionList({ sessions, activeId, onSelect, onClose }: Props) {
         <div className={`row ${s.sessionId === activeId ? 'active' : ''} ${s.exited ? 'exited' : ''}`}>
           <div className="row-head" onClick={() => onSelect(s.sessionId)}>
             <span className="row-cwd" title={s.cwd}>{basename(s.cwd) || s.sessionId}</span>
+            {s.recordCount > 0 && (
+              <span className="row-record" title={`${s.recordCount} 条录制`} onClick={(e) => { e.stopPropagation(); onShowRecord?.(s.sessionId); }}>●录({s.recordCount})</span>
+            )}
             {s.exited && s.exitCode !== undefined && <span className="row-code">exit {s.exitCode}</span>}
             <span className={`row-status ${statusClass}`}>
               <span className="dot" />

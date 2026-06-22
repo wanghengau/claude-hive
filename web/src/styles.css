@@ -330,3 +330,5 @@ body {
 .qi-add button:active { transform: translateY(1px); }
 
 .main-terminal .xterm { height: 100%; padding: 0; }
+.row-record { font: 11px ui-monospace, 'SF Mono', Menlo, monospace; color: #22C55E; cursor: pointer; padding: 1px 6px; border-radius: 4px; background: rgba(34,197,94,.12); margin-left: auto; }
+.row-record:hover { background: rgba(34,197,94,.22); }

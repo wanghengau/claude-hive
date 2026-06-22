@@ -8,6 +8,7 @@ export default defineConfig({
     proxy: {
       '/ws': { target: 'ws://localhost:4000', ws: true },
       '/sessions': { target: 'http://localhost:4000' },
+      '/api': { target: 'http://localhost:4000' },
     },
   },
   test: {

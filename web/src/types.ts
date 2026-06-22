@@ -18,3 +18,14 @@ export type ServerMessage =
   | { type: 'exit'; sessionId: string; code: number }
   | { type: 'sessions'; items: SessionInfo[] }
   | { type: 'cwd'; sessionId: string; cwd: string };
+
+export interface RecordSummary {
+  date: string;
+  id: string;
+  ts: string | null;
+  model: string | null;
+  status: number | null;
+  in: number;
+  out: number;
+}
+export type RecordCounts = Record<string, number>;

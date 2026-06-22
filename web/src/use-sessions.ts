@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import type { SessionInfo } from './types.js';
+import type { SessionInfo, RecordCounts } from './types.js';
 import type { WsClient } from './ws-client.js';
 
 export interface SessionWithStatus extends SessionInfo {
@@ -8,6 +8,7 @@ export interface SessionWithStatus extends SessionInfo {
   running: boolean;
   cwd: string;
   commands: string[];
+  recordCount: number;
 }
 
 // 有输出即视为"运行中"，静止超过此时长转为"等待输入"（事件驱动，非轮询）
@@ -20,6 +21,19 @@ export function useSessions(client: WsClient) {
   const [cwds, setCwds] = useState<Record<string, string>>({});
   const [commands, setCommands] = useState<Record<string, string[]>>({});
   const [running, setRunning] = useState<Record<string, boolean>>({});
+  const [recordCounts, setRecordCounts] = useState<RecordCounts>({});
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      try {
+        const r = await fetch('/api/record/counts');
+        if (r.ok && alive) setRecordCounts(await r.json());
+      } catch { /* server 未就绪忽略 */ }
+    };
+    tick();
+    const t = setInterval(tick, 3000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
   // 每会话的运行超时定时器（有新输出即重置）
   const runTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
@@ -101,8 +115,9 @@ export function useSessions(client: WsClient) {
       running: !s.exited && (running[s.sessionId] ?? false),
       cwd: cwds[s.sessionId] ?? '',
       commands: commands[s.sessionId] ?? [],
+      recordCount: recordCounts[s.sessionId] ?? 0,
     };
   });
 
-  return { sessions: sessionsWithStatus, activeId, setActiveId, create, close, reportSize };
+  return { sessions: sessionsWithStatus, activeId, setActiveId, create, close, reportSize, recordCounts };
 }
