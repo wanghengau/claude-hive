@@ -126,7 +126,9 @@ export function handleProxy(req: http.IncomingMessage, res: http.ServerResponse,
         });
       });
       proxyRes.pipe(res);   // 主路径：流式转发（零缓冲）
+      // 旁路 tap 无界累积，但 SSE 提取在 maxBytes 截止——响应有界，录制保真度受 maxBytes 限制（有意为之）
       proxyRes.pipe(tap);   // 旁路：累积录制
+      proxyRes.on('error', () => { try { res.end(); } catch { /* 响应已结束 */ } });
     });
     proxyReq.on('error', (err: Error) => {
       try { res.writeHead(502, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'proxy_error', message: err.message })); } catch { /* 已写头 */ }
