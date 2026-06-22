@@ -1,6 +1,10 @@
 import { Buffer } from 'node:buffer';
 import crypto from 'node:crypto';
+import http from 'node:http';
+import https from 'node:https';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
+import { sanitizeWindowId, writeRecord } from './record-store.js';
 
 export function buildTargetUrl(reqUrl: string, target: string): URL {
   // 不能用 new URL(reqUrl, target)：reqUrl 为绝对路径时会丢弃 target 的 path。手动拼接。
@@ -63,4 +67,71 @@ export function injectWebSearch(reqJson: any): Record<string, unknown> | null {
   const tools = Array.isArray(reqJson.tools) ? reqJson.tools : [];
   if (tools.some((t: Record<string, unknown>) => t && (t.name === 'web_search' || t.type === 'web_search_20250305'))) return null;
   return { ...reqJson, tools: [...tools, { type: 'web_search_20250305', name: 'web_search', max_uses: 5 }] };
+}
+
+export interface ProxyOpts {
+  target: string;
+  logDir: string;
+  maxBytes: number;
+  injectWebsearch: boolean;
+}
+
+export function handleProxy(req: http.IncomingMessage, res: http.ServerResponse, opts: ProxyOpts): void {
+  const startedAt = Date.now();
+  const chunks: Buffer[] = [];
+  req.on('data', (c: Buffer) => chunks.push(c));
+  req.on('end', () => {
+    const reqBody = Buffer.concat(chunks);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let reqJson: any = null;
+    try { reqJson = JSON.parse(reqBody.toString('utf8')); } catch { /* 非 JSON body */ }
+    let outBody: Buffer = reqBody;
+    let outJson = reqJson;
+    let injected = false;
+    if (opts.injectWebsearch && reqJson) {
+      const inj = injectWebSearch(reqJson);
+      if (inj) { outJson = inj; outBody = Buffer.from(JSON.stringify(inj), 'utf8'); injected = true; }
+    }
+    const windowId = sanitizeWindowId(req.headers['x-window-id'] as string | undefined);
+    const u = buildTargetUrl(req.url ?? '/', opts.target);
+    const isHttps = u.protocol === 'https:';
+    const mod = isHttps ? https : http;
+    // 转发前剥离内部窗口标记，不泄露给上游；其余 header 原样转发
+    const fwdHeaders: http.OutgoingHttpHeaders = { ...req.headers, host: u.hostname, 'content-length': String(outBody.length) };
+    delete fwdHeaders['x-window-id'];
+    const proxyReq = mod.request({
+      hostname: u.hostname,
+      port: u.port || (isHttps ? 443 : 80),
+      path: u.pathname + u.search,
+      method: req.method,
+      headers: fwdHeaders,
+    }, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+      const tap = new PassThrough();
+      const sse = new SSEAccumulator();
+      let bytes = 0, truncated = false;
+      tap.on('data', (c: Buffer) => {
+        if (bytes <= opts.maxBytes) { sse.feed(c); bytes += c.length; } else truncated = true;
+      });
+      tap.on('end', () => {
+        writeRecord(opts.logDir, {
+          id: makeRecordId(),
+          ts: new Date().toISOString(),
+          windowId,
+          model: (outJson && outJson.model) || null,
+          stream: !!(outJson && outJson.stream),
+          request: outJson || null,
+          response: { text: sse.text, stop_reason: sse.stopReason, usage: sse.usage },
+          meta: { status: proxyRes.statusCode ?? null, duration_ms: Date.now() - startedAt, bytes, truncated, injected_websearch: injected, response_headers: scrubAuth(proxyRes.headers as Record<string, unknown>) },
+        });
+      });
+      proxyRes.pipe(res);   // 主路径：流式转发（零缓冲）
+      proxyRes.pipe(tap);   // 旁路：累积录制
+    });
+    proxyReq.on('error', (err: Error) => {
+      try { res.writeHead(502, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'proxy_error', message: err.message })); } catch { /* 已写头 */ }
+    });
+    if (outBody.length) proxyReq.write(outBody);
+    proxyReq.end();
+  });
 }

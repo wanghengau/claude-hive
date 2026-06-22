@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import { PtyManager } from './pty-manager.js';
 import { handleConnection } from './ws-handler.js';
 import { hasTmux } from './tmux.js';
+import { handleProxy } from './record-proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '../../web/dist');
@@ -26,8 +27,23 @@ export async function createServer(opts: {
   }
   const mgr = new PtyManager(opts.socketName ? { socketName: opts.socketName } : {});
 
+  const RECORD_TARGET = process.env.RECORD_TARGET || 'https://open.bigmodel.cn/api/anthropic';
+  const RECORD_LOG_DIR = process.env.RECORD_LOG_DIR || path.resolve(__dirname, '../../data');
+  const RECORD_MAX_BYTES = parseInt(process.env.RECORD_MAX_BYTES || String(10 * 1024 * 1024), 10);
+  const RECORD_INJECT_WS = process.env.RECORD_INJECT_WEBSEARCH !== '0';
+
   const server = http.createServer((req, res) => {
     const url = req.url ?? '/';
+    const method = req.method ?? 'GET';
+    if (method === 'GET' && url.startsWith('/api/record/')) {
+      res.writeHead(501, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not implemented yet' }));
+      return;
+    }
+    if (method !== 'GET') {
+      handleProxy(req, res, { target: RECORD_TARGET, logDir: RECORD_LOG_DIR, maxBytes: RECORD_MAX_BYTES, injectWebsearch: RECORD_INJECT_WS });
+      return;
+    }
     if (url === '/sessions') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(mgr.list()));
