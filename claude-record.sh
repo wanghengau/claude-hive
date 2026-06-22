@@ -4,7 +4,7 @@
 # 用法: source claude-record.sh && claude-record -p "你好"
 claude-record() {
   local socket="${WMT_SOCKET:-wmt}"
-  local port="${WMT_PORT:-3000}"
+  local port="${WMT_PORT:-4000}"
   local wid="${WMT_WINDOW_ID:-$(tmux -L "$socket" display-message -p '#S' 2>/dev/null)}"
   wid="${wid:-default}"
   ANTHROPIC_BASE_URL="http://localhost:${port}" \

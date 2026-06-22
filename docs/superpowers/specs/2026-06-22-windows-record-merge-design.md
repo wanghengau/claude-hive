@@ -29,7 +29,7 @@
 
 ### windows（主体）
 
-- `server/src/`：`server.ts`（http + ws server，端口默认 3000，提供静态文件 + `/sessions` + `/ws`）、`pty-manager.ts`（tmux session 管理，socketName 默认 `wmt`）、`tmux.ts`、`ws-handler.ts`、`protocol.ts`、`ring-buffer.ts`，配 vitest 测试。
+- `server/src/`：`server.ts`（http + ws server，端口默认 4000，提供静态文件 + `/sessions` + `/ws`）、`pty-manager.ts`（tmux session 管理，socketName 默认 `wmt`）、`tmux.ts`、`ws-handler.ts`、`protocol.ts`、`ring-buffer.ts`，配 vitest 测试。
 - `web/src/`：React + Vite；`App.tsx`、`components/{session-list,main-terminal,quick-input}.tsx`、`ws-client.ts`、`use-sessions.ts`、`types.ts`。
 - npm workspaces：`server` + `web`；`npm run dev` 并发起 server(web) + web(vite)。
 
@@ -60,7 +60,7 @@
 
 ### 整体形态
 
-record-proxy 核心逻辑 TS 重写为 `server/src/record-proxy.ts` + `server/src/record-store.ts`，作为 windows server 的 HTTP 路由模块。**windows server 单端口**（默认 3000）同时承载：web UI、WebSocket(`/ws`)、claude API 代理（录制）、录制查看 API。一个进程、一个端口，生命周期随 windows。
+record-proxy 核心逻辑 TS 重写为 `server/src/record-proxy.ts` + `server/src/record-store.ts`，作为 windows server 的 HTTP 路由模块。**windows server 单端口**（默认 4000）同时承载：web UI、WebSocket(`/ws`)、claude API 代理（录制）、录制查看 API。一个进程、一个端口，生命周期随 windows。
 
 ### 识别机制（关键决策）
 
@@ -71,16 +71,16 @@ record-proxy 核心逻辑 TS 重写为 `server/src/record-proxy.ts` + `server/sr
 
 **采用 Header 方案**（URL path 前缀作为备选）：
 
-- `claude-record` 设 `ANTHROPIC_BASE_URL=http://localhost:3000` + `ANTHROPIC_CUSTOM_HEADERS="X-Window-Id: <id>"`。
+- `claude-record` 设 `ANTHROPIC_BASE_URL=http://localhost:4000` + `ANTHROPIC_CUSTOM_HEADERS="X-Window-Id: <id>"`。
 - 代理读 `X-Window-Id` 分组，**URL 完全透传**，现有 `buildTargetUrl` 零改动。
-- 实现第一步先跑冒烟验证 header 确实带上；带不上回退 path 前缀方案（`ANTHROPIC_BASE_URL=http://localhost:3000/r/<id>`，代理剥前缀）。
+- 实现第一步先跑冒烟验证 header 确实带上；带不上回退 path 前缀方案（`ANTHROPIC_BASE_URL=http://localhost:4000/r/<id>`，代理剥前缀）。
 
 ### 数据流
 
 ```
 1. 用户在 windows 窗口(某 wmt-* tmux session)内敲 claude-record
    → profile 执行: tmux -L wmt display -p '#S' 取当前窗口名 → wid
-2. profile export ANTHROPIC_BASE_URL=http://localhost:3000
+2. profile export ANTHROPIC_BASE_URL=http://localhost:4000
                 + ANTHROPIC_CUSTOM_HEADERS="X-Window-Id: <wid>"
    → 启动 claude
 3. claude POST /v1/messages → windows server 代理路由:
@@ -101,7 +101,7 @@ record-proxy 核心逻辑 TS 重写为 `server/src/record-proxy.ts` + `server/sr
 claude-record() {
   local wid="${WMT_WINDOW_ID:-$(tmux -L "${WMT_SOCKET:-wmt}" display-message -p '#S' 2>/dev/null)}"
   wid="${wid:-default}"   # 非 windows 终端 → default 分组
-  ANTHROPIC_BASE_URL="http://localhost:${WMT_PORT:-3000}" \
+  ANTHROPIC_BASE_URL="http://localhost:${WMT_PORT:-4000}" \
   ANTHROPIC_CUSTOM_HEADERS="X-Window-Id: $wid" \
   claude "$@"
 }
@@ -174,7 +174,7 @@ data/default/<YYYY-MM-DD>/...        # 非 windows 终端的录制
 }
 ```
 
-### 录制 API（挂到 windows server 同端口 3000）
+### 录制 API（挂到 windows server 同端口 4000）
 
 | 路由 | 作用 |
 |:--|:--|
