@@ -7,6 +7,7 @@ import { PtyManager } from './pty-manager.js';
 import { handleConnection } from './ws-handler.js';
 import { hasTmux } from './tmux.js';
 import { handleProxy } from './record-proxy.js';
+import { countRecords, listRecords, getRecord } from './record-store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '../../web/dist');
@@ -36,9 +37,20 @@ export async function createServer(opts: {
     const url = req.url ?? '/';
     const method = req.method ?? 'GET';
     if (method === 'GET' && url.startsWith('/api/record/')) {
-      res.writeHead(501, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'not implemented yet' }));
-      return;
+      const u = new URL(url, `http://localhost`);
+      const json = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
+      if (u.pathname === '/api/record/counts') return json(200, countRecords(RECORD_LOG_DIR));
+      if (u.pathname === '/api/record/list') {
+        const wid = u.searchParams.get('window') || 'default';
+        return json(200, listRecords(RECORD_LOG_DIR, wid));
+      }
+      const m = u.pathname.match(/^\/api\/record\/([A-Za-z0-9_-]+)\/(\d{4}-\d{2}-\d{2})\/([\w-]+)$/);
+      if (m) {
+        const rec = getRecord(RECORD_LOG_DIR, m[1], m[2], m[3]);
+        if (!rec) return json(404, { error: 'not found' });
+        return json(200, rec);
+      }
+      return json(404, { error: 'not found' });
     }
     if (method !== 'GET') {
       handleProxy(req, res, { target: RECORD_TARGET, logDir: RECORD_LOG_DIR, maxBytes: RECORD_MAX_BYTES, injectWebsearch: RECORD_INJECT_WS });
