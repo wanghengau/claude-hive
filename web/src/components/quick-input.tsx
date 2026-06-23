@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { WsClient } from '../ws-client.js';
 
-const STORAGE_KEY = 'quick-inputs';
 const DEFAULTS = ['ls -la', 'git status', 'git diff', 'clear', 'pwd', 'Ctrl-C'];
+const API = '/api/quick-commands';
 
 interface Props {
   client: WsClient;
@@ -11,25 +11,32 @@ interface Props {
 }
 
 export function QuickInput({ client, sessionId, onAfterSend }: Props) {
-  const [items, setItems] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch {
-      /* ignore */
-    }
-    return DEFAULTS;
-  });
+  // 加载前先显示默认值，避免首屏空
+  const [items, setItems] = useState<string[]>(DEFAULTS);
   const [draft, setDraft] = useState('');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
+  // 每次加载：用项目文件 quick-commands.json 的内容加载
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    } catch {
-      /* ignore */
-    }
-  }, [items]);
+    let alive = true;
+    fetch(API)
+      .then((r) => r.json())
+      .then((arr: unknown) => {
+        if (alive && Array.isArray(arr) && arr.every((x) => typeof x === 'string')) setItems(arr as string[]);
+      })
+      .catch(() => { /* 加载失败保留默认 */ });
+    return () => { alive = false; };
+  }, []);
+
+  // 修改后同步写回项目文件
+  const persist = (next: string[]) => {
+    setItems(next);
+    fetch(API, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(next),
+    }).catch(() => { /* 忽略写失败 */ });
+  };
 
   const send = (text: string) => {
     if (!sessionId) return;
@@ -44,12 +51,12 @@ export function QuickInput({ client, sessionId, onAfterSend }: Props) {
   const add = () => {
     const t = draft.trim();
     if (!t || items.includes(t)) return;
-    setItems((arr) => [...arr, t]);
+    persist([...items, t]);
     setDraft('');
   };
 
   const remove = (idx: number) => {
-    setItems((arr) => arr.filter((_, i) => i !== idx));
+    persist(items.filter((_, i) => i !== idx));
   };
 
   // 拖拽排序：从 dragIndex 拖到目标位置
@@ -58,12 +65,10 @@ export function QuickInput({ client, sessionId, onAfterSend }: Props) {
       setDragIndex(null);
       return;
     }
-    setItems((arr) => {
-      const next = [...arr];
-      const [moved] = next.splice(dragIndex, 1);
-      next.splice(to, 0, moved);
-      return next;
-    });
+    const next = [...items];
+    const [moved] = next.splice(dragIndex, 1);
+    next.splice(to, 0, moved);
+    persist(next);
     setDragIndex(null);
   };
 

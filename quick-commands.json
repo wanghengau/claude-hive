@@ -1,0 +1,8 @@
+[
+  "/rewind",
+  "/clear",
+  "claude-record",
+  "cd /Users/Shared/workspace/allmeta/ontoflow/",
+  "/model qwen3.7-plus",
+  "/model glm-5.1[1m]"
+]

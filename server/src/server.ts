@@ -8,6 +8,7 @@ import { handleConnection } from './ws-handler.js';
 import { hasTmux } from './tmux.js';
 import { handleProxy } from './record-proxy.js';
 import { countRecords, listRecords, getRecord } from './record-store.js';
+import { readQuickCommands, writeQuickCommands } from './quick-commands.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '../../web/dist');
@@ -22,6 +23,7 @@ const MIME: Record<string, string> = {
 export async function createServer(opts: {
   port: number;
   socketName?: string;
+  quickCommandsFile?: string;
 }) {
   if (!hasTmux()) {
     throw new Error('tmux 未安装，终端持久化服务无法启动');
@@ -32,6 +34,9 @@ export async function createServer(opts: {
   const RECORD_LOG_DIR = process.env.RECORD_LOG_DIR || path.resolve(__dirname, '../../data');
   const RECORD_MAX_BYTES = parseInt(process.env.RECORD_MAX_BYTES || String(10 * 1024 * 1024), 10);
   const RECORD_INJECT_WS = process.env.RECORD_INJECT_WEBSEARCH !== '0';
+  const QUICK_COMMANDS_FILE = opts.quickCommandsFile
+    || process.env.QUICK_COMMANDS_FILE
+    || path.resolve(__dirname, '../../quick-commands.json');
 
   const server = http.createServer((req, res) => {
     const url = req.url ?? '/';
@@ -51,6 +56,30 @@ export async function createServer(opts: {
         return json(200, rec);
       }
       return json(404, { error: 'not found' });
+    }
+    if (url === '/api/quick-commands') {
+      const json = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
+      if (method === 'GET') return json(200, readQuickCommands(QUICK_COMMANDS_FILE));
+      if (method === 'PUT') {
+        let body = '';
+        let tooBig = false;
+        req.on('data', (c) => {
+          body += c.toString('utf8');
+          if (body.length > 256 * 1024) tooBig = true;
+        });
+        req.on('end', () => {
+          if (tooBig) return json(413, { error: 'payload too large' });
+          let arr: unknown;
+          try { arr = JSON.parse(body); } catch { return json(400, { error: 'invalid json' }); }
+          if (!Array.isArray(arr) || arr.length > 500 || arr.some((x) => typeof x !== 'string' || x.length > 2000)) {
+            return json(400, { error: 'must be a string array (≤500 items, ≤2000 chars each)' });
+          }
+          try { writeQuickCommands(QUICK_COMMANDS_FILE, arr as string[]); } catch { return json(500, { error: 'write failed' }); }
+          return json(200, { ok: true });
+        });
+        return;
+      }
+      return json(405, { error: 'method not allowed' });
     }
     if (method !== 'GET') {
       handleProxy(req, res, { target: RECORD_TARGET, logDir: RECORD_LOG_DIR, maxBytes: RECORD_MAX_BYTES, injectWebsearch: RECORD_INJECT_WS });
