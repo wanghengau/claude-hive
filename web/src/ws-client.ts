@@ -4,7 +4,7 @@ type DataHandler = (sessionId: string, data: string) => void;
 type MessageHandler = (msg: ServerMessage) => void;
 type CommandHandler = (sessionId: string) => void;
 
-const MAX_BUFFER = 50000;
+const MAX_BUFFER = 2000000;
 const MAX_HISTORY = 50;
 const COMMANDS_KEY = 'term-commands';
 
@@ -130,11 +130,27 @@ export class WsClient {
       if (code === 0x1b) {
         const next = data[i + 1];
         if (next === '[') {
+          // CSI: ESC [ 参数... 终结字节(0x40-0x7e) —— 方向键/Home/End/Delete 等
           i += 2;
           while (i < data.length) {
             const c = data.charCodeAt(i);
             i++;
             if (c >= 0x40 && c <= 0x7e) break;
+          }
+        } else if (next === 'O') {
+          // SS3: ESC O 终结字节 —— application 模式下的方向键/F1-F4/Home/End，固定 3 字节整体跳过，
+          // 否则末尾字母(A/B/C/D/P/H/F…)会残留进命令，显示成"乱码前缀"
+          i += 3;
+        } else if (next === ']' || next === 'P' || next === '^' || next === '_') {
+          // OSC/DCS/PM/APC: ESC X 参数... —— 以 BEL(\x07) 或 ST(ESC \) 结束。
+          // xterm 响应 OSC 10/11 颜色查询时会经 onData 回流 ESC ] 10 ; rgb:... BEL，
+          // 必须整体跳过，否则 "10;rgb:cbcb/d5d5/e1e1" 会残留成命令前缀
+          i += 2;
+          while (i < data.length) {
+            const c = data.charCodeAt(i);
+            if (c === 0x07) { i++; break; }                       // BEL 结束
+            if (c === 0x1b && data.charCodeAt(i + 1) === 0x5c) { i += 2; break; }  // ST(ESC \) 结束
+            i++;
           }
         } else if (next !== undefined) {
           i += 2;
