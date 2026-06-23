@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import type { SessionInfo, RecordCounts } from './types.js';
 import type { WsClient } from './ws-client.js';
 
@@ -22,6 +22,8 @@ export function useSessions(client: WsClient) {
   const [commands, setCommands] = useState<Record<string, string[]>>({});
   const [running, setRunning] = useState<Record<string, boolean>>({});
   const [recordCounts, setRecordCounts] = useState<RecordCounts>({});
+  // 用户拖拽产生的本地顺序覆盖；null 表示沿用 server 下发顺序
+  const [order, setOrder] = useState<string[] | null>(null);
   useEffect(() => {
     let alive = true;
     const tick = async () => {
@@ -106,7 +108,35 @@ export function useSessions(client: WsClient) {
     });
   }, []);
 
-  const sessionsWithStatus: SessionWithStatus[] = sessions.map((s) => {
+  // 按 order 重排：order 里的 id 优先（跳过已不存在的），新会话追加末尾。order 为 null 时沿用 server 顺序
+  const orderedSessions = useMemo(() => {
+    if (!order) return sessions;
+    const byId = new Map(sessions.map((s) => [s.sessionId, s]));
+    const seen = new Set<string>();
+    const result: SessionInfo[] = [];
+    for (const id of order) {
+      const s = byId.get(id);
+      if (s && !seen.has(id)) { result.push(s); seen.add(id); }
+    }
+    for (const s of sessions) {
+      if (!seen.has(s.sessionId)) { result.push(s); seen.add(s.sessionId); }
+    }
+    return result;
+  }, [sessions, order]);
+
+  // 拖拽重排：基于当前显示顺序的索引，把 from 移到 to
+  const reorder = useCallback((from: number, to: number) => {
+    setOrder(() => {
+      const ids = orderedSessions.map((s) => s.sessionId);
+      if (from === to || from < 0 || to < 0 || from >= ids.length || to >= ids.length) return ids;
+      const next = [...ids];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }, [orderedSessions]);
+
+  const sessionsWithStatus: SessionWithStatus[] = orderedSessions.map((s) => {
     const size = sizes[s.sessionId] ?? { cols: 80, rows: 24 };
     return {
       ...s,
@@ -119,5 +149,5 @@ export function useSessions(client: WsClient) {
     };
   });
 
-  return { sessions: sessionsWithStatus, activeId, setActiveId, create, close, reportSize, recordCounts };
+  return { sessions: sessionsWithStatus, activeId, setActiveId, create, close, reportSize, reorder, recordCounts };
 }

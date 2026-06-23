@@ -15,7 +15,7 @@ export function App() {
     return c;
   });
 
-  const { sessions, activeId, setActiveId, create, close, reportSize } = useSessions(client);
+  const { sessions, activeId, setActiveId, create, close, reportSize, reorder } = useSessions(client);
   const active = sessions.find((s) => s.sessionId === activeId) ?? null;
   const mainRef = useRef<MainTerminalHandle>(null);
   const [recordViewId, setRecordViewId] = useState<string | null>(null);
@@ -38,6 +38,7 @@ export function App() {
           onSelect={setActiveId}
           onClose={close}
           onShowRecord={setRecordViewId}
+          onReorder={reorder}
         />
       </aside>
       <main className="main">

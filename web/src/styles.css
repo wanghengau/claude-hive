@@ -158,6 +158,8 @@ body {
   box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-md), var(--accent-glow);
 }
 .row.exited .row-inputs { opacity: 0.5; }
+.row.dragging { opacity: 0.4; }
+.row.drop-target { border-color: var(--accent); border-style: dashed; }
 
 .row-head {
   display: flex;

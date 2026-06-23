@@ -37,4 +37,50 @@ describe('useSessions', () => {
     act(() => result.current.create(80, 24));
     expect((client as unknown as MockWsClient).sent).toEqual([{ type: 'create', cols: 80, rows: 24 }]);
   });
+
+  it('reorder 调整会话显示顺序', () => {
+    const client = new MockWsClient() as unknown as WsClient;
+    const { result } = renderHook(() => useSessions(client));
+    act(() => (client as unknown as MockWsClient).emit({
+      type: 'sessions',
+      items: [
+        { sessionId: 's1', createdAt: 1, exited: false },
+        { sessionId: 's2', createdAt: 2, exited: false },
+        { sessionId: 's3', createdAt: 3, exited: false },
+      ],
+    }));
+    expect(result.current.sessions.map((s) => s.sessionId)).toEqual(['s1', 's2', 's3']);
+    act(() => result.current.reorder(0, 2)); // 把 s1 移到末尾
+    expect(result.current.sessions.map((s) => s.sessionId)).toEqual(['s2', 's3', 's1']);
+  });
+
+  it('reorder 同位置或越界不改顺序', () => {
+    const client = new MockWsClient() as unknown as WsClient;
+    const { result } = renderHook(() => useSessions(client));
+    act(() => (client as unknown as MockWsClient).emit({
+      type: 'sessions',
+      items: [
+        { sessionId: 's1', createdAt: 1, exited: false },
+        { sessionId: 's2', createdAt: 2, exited: false },
+      ],
+    }));
+    act(() => result.current.reorder(0, 0)); // 同位置
+    act(() => result.current.reorder(5, 0)); // 越界
+    expect(result.current.sessions.map((s) => s.sessionId)).toEqual(['s1', 's2']);
+  });
+
+  it('新会话追加到已排序顺序的末尾', () => {
+    const client = new MockWsClient() as unknown as WsClient;
+    const { result } = renderHook(() => useSessions(client));
+    act(() => (client as unknown as MockWsClient).emit({
+      type: 'sessions',
+      items: [
+        { sessionId: 's1', createdAt: 1, exited: false },
+        { sessionId: 's2', createdAt: 2, exited: false },
+      ],
+    }));
+    act(() => result.current.reorder(0, 1)); // [s2, s1]
+    act(() => (client as unknown as MockWsClient).emit({ type: 'created', sessionId: 's3' }));
+    expect(result.current.sessions.map((s) => s.sessionId)).toEqual(['s2', 's1', 's3']);
+  });
 });
