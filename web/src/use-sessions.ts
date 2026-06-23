@@ -13,6 +13,26 @@ export interface SessionWithStatus extends SessionInfo {
 
 // 有输出即视为"运行中"，静止超过此时长转为"等待输入"（事件驱动，非轮询）
 const RUNNING_THRESHOLD_MS = 800;
+const ORDER_KEY = 'term-session-order';
+
+// 会话顺序持久化到 localStorage，刷新后保留用户拖拽的排序；不可用时降级为仅内存
+function loadOrder(): string[] | null {
+  try {
+    const raw = localStorage.getItem(ORDER_KEY);
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) && arr.every((x) => typeof x === 'string') ? arr : null;
+  } catch {
+    return null;
+  }
+}
+function saveOrder(ids: string[]): void {
+  try {
+    localStorage.setItem(ORDER_KEY, JSON.stringify(ids));
+  } catch {
+    /* localStorage 不可用则降级为仅内存 */
+  }
+}
 
 export function useSessions(client: WsClient) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -22,8 +42,8 @@ export function useSessions(client: WsClient) {
   const [commands, setCommands] = useState<Record<string, string[]>>({});
   const [running, setRunning] = useState<Record<string, boolean>>({});
   const [recordCounts, setRecordCounts] = useState<RecordCounts>({});
-  // 用户拖拽产生的本地顺序覆盖；null 表示沿用 server 下发顺序
-  const [order, setOrder] = useState<string[] | null>(null);
+  // 用户拖拽产生的本地顺序覆盖；初始从 localStorage 恢复，null 表示沿用 server 下发顺序
+  const [order, setOrder] = useState<string[] | null>(loadOrder);
   useEffect(() => {
     let alive = true;
     const tick = async () => {
@@ -124,14 +144,15 @@ export function useSessions(client: WsClient) {
     return result;
   }, [sessions, order]);
 
-  // 拖拽重排：基于当前显示顺序的索引，把 from 移到 to
+  // 拖拽重排：基于当前显示顺序的索引，把 from 移到 to；写回 localStorage 供刷新后恢复
   const reorder = useCallback((from: number, to: number) => {
-    setOrder(() => {
+    setOrder((prev) => {
       const ids = orderedSessions.map((s) => s.sessionId);
-      if (from === to || from < 0 || to < 0 || from >= ids.length || to >= ids.length) return ids;
+      if (from === to || from < 0 || to < 0 || from >= ids.length || to >= ids.length) return prev;
       const next = [...ids];
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
+      saveOrder(next);
       return next;
     });
   }, [orderedSessions]);
