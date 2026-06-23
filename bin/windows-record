@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# windows-record: 在任意目录后台常驻管理 windows-record 全部服务 (server:4000 + web)。
+# 后台机制：nohup 让进程树忽略 SIGHUP (SIG_IGN 经 fork 继承给 server/web)，
+#           关闭终端不退出；子 shell + set -m 使 npm 自成进程组，stop 时
+#           kill -- -PID 一次性清掉整棵树，再用端口兜底防残留。
+# 安装：symlink 本文件到 ~/.local/bin/windows-record (该目录已在 PATH)。
+set -u
+
+# --- 项目根目录自定位 (兼容 symlink 与 macOS bash 3.2，readlink 无 -f) ---
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+PROJECT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+
+RUN_DIR="$PROJECT_DIR/.run"
+PID_FILE="$RUN_DIR/windows-record.pid"
+LOG_FILE="$RUN_DIR/windows-record.log"
+SERVER_PORT="${PORT:-4000}"
+WEB_PORT="${WEB_PORT:-4001}"
+
+usage() {
+  cat <<EOF
+windows-record — 后台管理 windows-record 服务
+
+用法:
+  windows-record             启动所有服务 (后台)
+  windows-record start       同上
+  windows-record stop        停止所有服务
+  windows-record restart     重启
+  windows-record status      查看运行状态
+  windows-record logs [-f]   查看日志 (-f/--follow 实时跟随)
+  windows-record help        显示本帮助
+
+端口: server :${SERVER_PORT}   web :${WEB_PORT}
+日志: ${LOG_FILE}
+项目: ${PROJECT_DIR}
+EOF
+}
+
+is_running() {
+  [[ -f "$PID_FILE" ]] || return 1
+  local pid; pid="$(cat "$PID_FILE" 2>/dev/null)"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+port_listen() { lsof -ti tcp:"$1" >/dev/null 2>&1; }
+
+start() {
+  if is_running; then
+    echo "已在运行 (PID $(cat "$PID_FILE"))，用 'windows-record restart' 重启。"
+    return 0
+  fi
+  mkdir -p "$RUN_DIR"
+  : > "$LOG_FILE"
+  echo "启动中 (后台)..."
+  (
+    set -m                                 # 后台作业自成进程组 (PGID=PID)
+    cd "$PROJECT_DIR" || exit 1
+    nohup npm run dev < /dev/null > "$LOG_FILE" 2>&1 &
+    echo "$!" > "$PID_FILE"
+  )
+  sleep 1.5
+  if is_running; then
+    echo "已启动 (PID $(cat "$PID_FILE"))"
+    echo "  server:  http://localhost:${SERVER_PORT}"
+    echo "  web:     http://localhost:${WEB_PORT}  (端口见 web/vite.config.ts)"
+    echo "  日志:    windows-record logs -f"
+  else
+    echo "启动失败，日志末尾："
+    tail -n 30 "$LOG_FILE" 2>/dev/null
+    rm -f "$PID_FILE"
+    return 1
+  fi
+}
+
+stop() {
+  if [[ ! -f "$PID_FILE" ]]; then
+    echo "未运行 (无 pidfile)。"
+    return 0
+  fi
+  local pid; pid="$(cat "$PID_FILE" 2>/dev/null)"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+    echo "进程已不在 (清理 pidfile)。"
+    rm -f "$PID_FILE"
+    return 0
+  fi
+  echo "停止 (PID $pid)..."
+  kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null   # 杀整个进程组
+  for _ in 1 2 3 4 5 6; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.5
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null
+    sleep 0.5
+  fi
+  for p in "$SERVER_PORT" "$WEB_PORT"; do                           # 端口兜底清残留
+    local r; r="$(lsof -ti tcp:"$p" 2>/dev/null)"
+    [[ -n "$r" ]] && kill "$r" 2>/dev/null
+  done
+  rm -f "$PID_FILE"
+  echo "已停止。"
+}
+
+status() {
+  if is_running; then
+    echo "运行中 (PID $(cat "$PID_FILE"))"
+    if port_listen "$SERVER_PORT"; then echo "  server (:${SERVER_PORT}) 监听中"
+    else echo "  server (:${SERVER_PORT}) 未监听 (可能仍在启动)"; fi
+    if port_listen "$WEB_PORT";    then echo "  web (:${WEB_PORT}) 监听中"
+    else echo "  web (:${WEB_PORT}) 未监听"; fi
+  else
+    echo "未运行。"
+    return 1
+  fi
+}
+
+logs() {
+  [[ -f "$LOG_FILE" ]] || { echo "无日志 ($LOG_FILE)，服务可能从未启动。"; return 1; }
+  if [[ "${1:-}" == "-f" || "${1:-}" == "--follow" ]]; then
+    tail -f "$LOG_FILE"
+  else
+    tail -n 50 "$LOG_FILE"
+  fi
+}
+
+case "${1:-start}" in
+  start)         start ;;
+  stop)          stop ;;
+  restart)       stop; start ;;
+  status)        status ;;
+  logs)          logs "${2:-}" ;;
+  help|-h|--help) usage ;;
+  *) echo "未知命令: $1" >&2; echo >&2; usage >&2; exit 1 ;;
+esac

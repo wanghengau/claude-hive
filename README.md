@@ -8,6 +8,22 @@ npm install
 npm run dev          # 起 server(:4000) + web(vite)
 ```
 
+## 常驻服务 (windows-record 命令)
+
+装好后可在**任意目录**后台常驻运行，关闭终端不退出（nohup + 进程组管理）：
+
+```bash
+windows-record          # 启动 server(:4000) + web(:4001)，后台运行
+windows-record status   # 查看运行状态
+windows-record logs -f  # 实时跟随日志
+windows-record stop     # 停止所有服务
+windows-record restart  # 重启
+```
+
+- 安装：symlink 到 `~/.local/bin/windows-record`（该目录已在 PATH，无需 sudo）。
+- 运行时文件：项目内 `.run/windows-record.{pid,log}`（已 gitignore）。
+- 机制：子 shell + `set -m` 使 npm 自成进程组，`nohup` 让进程树忽略 SIGHUP，stop 时 `kill -- -PID` 清掉整棵树，端口兜底防残留。
+
 ## 录制（在某个 windows 窗口内）
 ```bash
 source claude-record.sh
