@@ -4,7 +4,7 @@ import { RingBuffer } from './ring-buffer.js';
 import * as tmux from './tmux.js';
 import type { CwdHandler, DataHandler, ExitHandler, IPtyManager, SessionInfo } from './protocol.js';
 
-const RING_MAX = 50 * 1024;
+const RING_MAX = 1024 * 1024;
 const CWD_POLL_MS = 3000;
 
 interface Session {
