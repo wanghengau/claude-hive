@@ -52,7 +52,11 @@ export function genSessionName(): string {
 export function newSessionSync(opts: TmuxOpts, name: string, cols: number, rows: number, cwd: string): void {
   runSync([
     ...baseArgs(opts),
-    'new-session', '-d', '-s', name,
+    // history-limit 必须在 new-session 之前设置：tmux 在 pane 创建时按此值分配历史缓冲，
+    // 事后改无效。默认仅 2000 行——server 重启重新 attach 时只能重绘这点历史，
+    // ring buffer 又被清空重建，导致刷新浏览器后滚不动多少。提到 50000 与 scrollback 对齐。
+    'set', '-g', 'history-limit', '50000',
+    ';', 'new-session', '-d', '-s', name,
     '-x', String(cols), '-y', String(rows),
     '-c', cwd,
     ';', 'set', '-g', 'status', 'off',
@@ -99,6 +103,14 @@ export async function getCwd(opts: TmuxOpts, name: string): Promise<string> {
   } catch {
     return '';
   }
+}
+
+// 抓取 pane 的 scrollback 历史（-S - 从历史起始到当前；-e 保留颜色等转义）。
+// attach 进程只重绘当前 viewport，不含历史；server 重启后重新 attach 必须主动 capture 取回，
+// 否则 ring 只有一屏、刷新浏览器后看不到旧输出。
+// capture-pane 行尾是裸 \n（LF），xterm 重放需 \r\n：\n 只下移行不回行首，会逐行右移成阶梯串行。
+export function capturePaneSync(opts: TmuxOpts, name: string): string {
+  return runSync([...baseArgs(opts), 'capture-pane', '-t', name, '-p', '-e', '-S', '-'], true).replace(/\n/g, '\r\n');
 }
 
 // node-pty spawn 时用的 attach 参数

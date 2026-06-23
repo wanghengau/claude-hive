@@ -114,6 +114,9 @@ describe('PtyManager 启动恢复', () => {
     const mgr2 = new PtyManager({ socketName: socket });
     await waitFor(() => mgr2.list().some((s) => s.sessionId === id), 8000);
     expect(mgr2.list().some((s) => s.sessionId === id)).toBe(true);
+    // 重新 attach 后 ring 应含历史输出：capture-pane 主动取回 scrollback，
+    // 否则 attach 只给当前 viewport 一屏，RESTOREMARK（已滚进 scrollback）拿不回来
+    expect(mgr2.getRingBuffer(id)).toContain('RESTOREMARK');
     // macOS /tmp → /private/tmp，用结尾匹配
     await waitFor(() => /\/tmp$/.test(mgr2.getCwd(id)));
     mgr2.dispose();

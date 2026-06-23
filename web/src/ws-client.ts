@@ -34,11 +34,14 @@ export class WsClient {
       let msg: ServerMessage;
       try { msg = JSON.parse(e.data); } catch { return; }
       if (msg.type === 'data') {
+        // 过滤 alt screen 切换（ESC[?1049h/l）：claude 等全屏 TUI 进 alt screen 后，启动前的 shell 输出
+        // 会被 alt buffer 遮盖、终端滚动条滚不到。去掉该序列让应用留在主 buffer，历史进 scrollback 可回看。
+        const payload = msg.payload.replace(/\x1b\[\?1049[hl]/g, '');
         let buf = this.buffers.get(msg.sessionId) ?? '';
-        buf += msg.payload;
+        buf += payload;
         if (buf.length > MAX_BUFFER) buf = buf.slice(buf.length - MAX_BUFFER);
         this.buffers.set(msg.sessionId, buf);
-        this.dataHandlers.get(msg.sessionId)?.forEach((h) => h(msg.sessionId, msg.payload));
+        this.dataHandlers.get(msg.sessionId)?.forEach((h) => h(msg.sessionId, payload));
       }
       this.messageHandlers.forEach((h) => h(msg));
     };

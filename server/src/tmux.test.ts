@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { describe, it, expect, afterAll } from 'vitest';
 import {
   hasTmux, genSessionName, newSessionSync, listNames, killServerSync,
@@ -25,6 +26,14 @@ describe('tmux 会话生命周期', () => {
     newSessionSync(opts, 'wmt-life', 80, 24, '/tmp');
     const names = await listNames(opts);
     expect(names).toContain('wmt-life');
+  });
+
+  it('newSessionSync 把 history-limit 提到 50000（默认仅 2000，刷新/重连后可恢复的历史受此限制）', () => {
+    newSessionSync(opts, 'wmt-hist', 80, 24, '/tmp');
+    const out = execFileSync('tmux', ['-L', opts.socketName, '-f', '/dev/null', 'show-options', '-g', 'history-limit'], {
+      encoding: 'utf-8', timeout: 2000,
+    });
+    expect(out.trim()).toBe('history-limit 50000');
   });
 });
 

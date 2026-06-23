@@ -72,6 +72,11 @@ export class PtyManager implements IPtyManager {
   protected spawnAttach(name: string, cols = 80, rows = 24): Session {
     const pty = spawn('tmux', tmux.attachArgs(this.opts, name), { cols, rows });
     const session: Session = { id: name, pty, createdAt: Date.now(), exited: false, ring: new RingBuffer(RING_MAX) };
+    // attach 进程只接收当前 viewport，不含 scrollback 历史；主动 capture-pane 取回 tmux 保存的历史灌入 ring，
+    // 使 server 重启后重新 attach（restore）也能恢复历史，刷新浏览器后可滚动回看。必须在 onData 注册前 push，
+    // 保证重放顺序为「历史 → 实时流」。
+    const history = tmux.capturePaneSync(this.opts, name);
+    if (history) session.ring.push(history);
     pty.onData((data) => {
       session.ring.push(data);
       this.dataHandlers.forEach((h) => h(name, data));

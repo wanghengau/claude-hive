@@ -9,11 +9,16 @@ import { RecordView } from './components/record-view.js';
 const WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
 
 export function App() {
-  const [client] = useState(() => {
+  // StrictMode 会双调用 useState 初始化函数，从而创建两个 WsClient、两条 WS 连接：
+  // 没注册 onOpen 的那条收不到 list 的 ring 重放，term 就只有一屏实时数据（length≈rows、baseY=0）。
+  // 改用 ref 单例：ref.current 首次赋值后，StrictMode 二次 render 直接复用，全程只建一个连接。
+  const clientRef = useRef<WsClient | null>(null);
+  if (!clientRef.current) {
     const c = new WsClient(WS_URL);
     c.connect();
-    return c;
-  });
+    clientRef.current = c;
+  }
+  const client = clientRef.current;
 
   const { sessions, activeId, setActiveId, create, close, reportSize, reorder } = useSessions(client);
   const active = sessions.find((s) => s.sessionId === activeId) ?? null;
