@@ -31,7 +31,7 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
   useEffect(() => {
     if (!containerRef.current || !sessionId) return;
     const term = new Terminal({
-      fontSize: 14,
+      fontSize: 18,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', ui-monospace, Menlo, Consolas, monospace",
       scrollback: 50000,
       cursorBlink: true,
