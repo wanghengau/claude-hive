@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { parseChunk } from './command-history.js';
 
 describe('parseChunk 命令解析', () => {
@@ -47,5 +47,100 @@ describe('parseChunk 命令解析', () => {
   });
   it('跨 chunk 的半行累积(无回车不成形)', () => {
     expect(run('git ', 'sta', 'tus\r')).toEqual(['git status']);
+  });
+});
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { appendTruncated, sanitizeSessionId, load, save, remove, prune } from './command-history.js';
+
+let dir: string;
+beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ch-')); });
+afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+describe('appendTruncated', () => {
+  it('未达上限直接追加', () => {
+    expect(appendTruncated(['a'], 'b', 50)).toEqual(['a', 'b']);
+  });
+  it('达到上限丢最旧', () => {
+    expect(appendTruncated(['a', 'b', 'c'], 'd', 3)).toEqual(['b', 'c', 'd']);
+  });
+  it('空数组', () => {
+    expect(appendTruncated([], 'x', 50)).toEqual(['x']);
+  });
+});
+
+describe('sanitizeSessionId', () => {
+  it('合法 id 通过', () => {
+    expect(sanitizeSessionId('wmt-0mcx5sf2')).toBe('wmt-0mcx5sf2');
+  });
+  it('含路径穿越 → null', () => {
+    expect(sanitizeSessionId('../etc')).toBeNull();
+    expect(sanitizeSessionId('a/b')).toBeNull();
+  });
+  it('含空格 → null', () => {
+    expect(sanitizeSessionId('a b')).toBeNull();
+  });
+  it('空串 → null', () => {
+    expect(sanitizeSessionId('')).toBeNull();
+  });
+});
+
+describe('load', () => {
+  it('文件不存在 → []', () => {
+    expect(load(dir, 'nope')).toEqual([]);
+  });
+  it('非法 JSON → []', () => {
+    fs.writeFileSync(path.join(dir, 'bad.json'), 'not json');
+    expect(load(dir, 'bad')).toEqual([]);
+  });
+  it('合法 → 返回内容', () => {
+    fs.writeFileSync(path.join(dir, 's.json'), JSON.stringify(['x', 'y']));
+    expect(load(dir, 's')).toEqual(['x', 'y']);
+  });
+  it('sessionId 非法 → []', () => {
+    expect(load(dir, '../etc')).toEqual([]);
+  });
+});
+
+describe('save', () => {
+  it('写入后可 load 读回', () => {
+    save(dir, 's', ['a', 'b']);
+    expect(load(dir, 's')).toEqual(['a', 'b']);
+  });
+  it('sessionId 非法 → 不写文件(静默)', () => {
+    save(dir, '../etc', ['a']);
+    expect(fs.existsSync(path.join(dir, '..', 'etc.json'))).toBe(false);
+  });
+});
+
+describe('remove', () => {
+  it('删除已存在文件', () => {
+    save(dir, 's', ['a']);
+    remove(dir, 's');
+    expect(fs.existsSync(path.join(dir, 's.json'))).toBe(false);
+  });
+  it('文件不存在不抛错', () => {
+    expect(() => remove(dir, 'nope')).not.toThrow();
+  });
+});
+
+describe('prune', () => {
+  it('删除不在存活集合的文件', () => {
+    save(dir, 'a', ['1']);
+    save(dir, 'b', ['2']);
+    save(dir, 'c', ['3']);
+    prune(dir, new Set(['a', 'c']));
+    expect(fs.existsSync(path.join(dir, 'a.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'c.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'b.json'))).toBe(false);
+  });
+  it('非 *.json / 非法名文件不动', () => {
+    fs.writeFileSync(path.join(dir, 'readme.txt'), 'x');
+    fs.writeFileSync(path.join(dir, 'a.json'), '[]');
+    prune(dir, new Set([]));
+    expect(fs.existsSync(path.join(dir, 'readme.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'a.json'))).toBe(false);
   });
 });
