@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect, memo, type CSSProperties } from 'react';
+import { useState, useRef, useLayoutEffect, useCallback, memo, type CSSProperties } from 'react';
 import { FixedSizeList as List } from 'react-window';
 import type { SessionWithStatus } from '../use-sessions.js';
 
@@ -50,6 +50,21 @@ const Row = memo(function Row({ index, style, data }: { index: number; style: CS
       el.scrollTop = el.scrollHeight;
     }
   }, [s.commands.length, s.sessionId]);
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = inputsRef.current;
+    if (!el) return;
+    let dy = e.deltaY;
+    if (e.deltaMode === 1) {
+      dy *= 18; // DOM_DELTA_LINE → px
+    } else if (e.deltaMode === 2) {
+      dy *= el.clientHeight; // DOM_DELTA_PAGE → px
+    }
+    el.scrollTop += dy;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
+    pinnedRef.current = atBottom;
+  }, []);
   return (
     <div style={style} className="row-slot">
       <div
@@ -80,7 +95,12 @@ const Row = memo(function Row({ index, style, data }: { index: number; style: CS
             {statusText}
           </span>
         </div>
-        <div ref={inputsRef} className="row-inputs" onClick={() => data.onSelect(s.sessionId)}>
+        <div
+          ref={inputsRef}
+          className="row-inputs"
+          onClick={() => data.onSelect(s.sessionId)}
+          onWheel={handleWheel}
+        >
           {cmds.length === 0 ? (
             <div className="row-input-empty">（暂无输入）</div>
           ) : (
