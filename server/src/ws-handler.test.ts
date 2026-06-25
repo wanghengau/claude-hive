@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { handleConnection } from './ws-handler.js';
-import type { IPtyManager, SessionInfo } from './protocol.js';
+import type { IPtyManager, ServerMessage, SessionInfo } from './protocol.js';
+import type { CmdCtx } from './ws-handler.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 class FakePtyManager implements IPtyManager {
   creates: any[] = [];
@@ -44,10 +48,26 @@ function makeFakeWs() {
 }
 
 describe('ws-handler', () => {
+  let tmpDir: string;
+  let cmdCtx: CmdCtx;
+  let broadcast: (m: ServerMessage) => void;
+  let broadcastSent: ServerMessage[];
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wh-'));
+    cmdCtx = { dir: tmpDir, sessions: new Map() };
+    broadcastSent = [];
+    broadcast = (m) => broadcastSent.push(m);
+  });
+
+  afterEach(() => {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
   it('create 转发并回 created', () => {
     const mgr = new FakePtyManager();
     const ws = makeFakeWs();
-    handleConnection(ws as any, mgr);
+    handleConnection(ws as any, mgr, cmdCtx, broadcast);
     ws.emit('message', JSON.stringify({ type: 'create', cols: 80, rows: 24 }));
     expect(mgr.creates).toEqual([{ cols: 80, rows: 24 }]);
     expect(ws.sent).toContain(JSON.stringify({ type: 'created', sessionId: 's1' }));
@@ -56,7 +76,7 @@ describe('ws-handler', () => {
   it('pty data 事件转发为 data 消息', () => {
     const mgr = new FakePtyManager();
     const ws = makeFakeWs();
-    handleConnection(ws as any, mgr);
+    handleConnection(ws as any, mgr, cmdCtx, broadcast);
     mgr.emitData('s1', 'hello');
     expect(ws.sent).toContain(JSON.stringify({ type: 'data', sessionId: 's1', payload: 'hello' }));
   });
@@ -64,7 +84,7 @@ describe('ws-handler', () => {
   it('input/resize/close 路由到 mgr', () => {
     const mgr = new FakePtyManager();
     const ws = makeFakeWs();
-    handleConnection(ws as any, mgr);
+    handleConnection(ws as any, mgr, cmdCtx, broadcast);
     ws.emit('message', JSON.stringify({ type: 'input', sessionId: 's1', data: 'x' }));
     ws.emit('message', JSON.stringify({ type: 'resize', sessionId: 's1', cols: 100, rows: 30 }));
     ws.emit('message', JSON.stringify({ type: 'close', sessionId: 's1' }));
@@ -77,7 +97,7 @@ describe('ws-handler', () => {
     const mgr = new FakePtyManager();
     mgr.rings.set('s1', 'REPLAY');
     const ws = makeFakeWs();
-    handleConnection(ws as any, mgr);
+    handleConnection(ws as any, mgr, cmdCtx, broadcast);
     ws.emit('message', JSON.stringify({ type: 'list' }));
     expect(mgr.listed).toBe(true);
     expect(ws.sent).toContain(JSON.stringify({ type: 'data', sessionId: 's1', payload: 'REPLAY' }));
@@ -86,7 +106,7 @@ describe('ws-handler', () => {
   it('exit 转发为 exit 消息', () => {
     const mgr = new FakePtyManager();
     const ws = makeFakeWs();
-    handleConnection(ws as any, mgr);
+    handleConnection(ws as any, mgr, cmdCtx, broadcast);
     mgr.emitExit('s1', 3);
     expect(ws.sent).toContain(JSON.stringify({ type: 'exit', sessionId: 's1', code: 3 }));
   });
@@ -94,7 +114,7 @@ describe('ws-handler', () => {
   it('cwd 转发为 cwd 消息', () => {
     const mgr = new FakePtyManager();
     const ws = makeFakeWs();
-    handleConnection(ws as any, mgr);
+    handleConnection(ws as any, mgr, cmdCtx, broadcast);
     mgr.emitCwd('s1', '/tmp');
     expect(ws.sent).toContain(JSON.stringify({ type: 'cwd', sessionId: 's1', cwd: '/tmp' }));
   });

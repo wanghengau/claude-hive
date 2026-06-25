@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { PtyManager } from './pty-manager.js';
 import { handleConnection } from './ws-handler.js';
+import type { CmdCtx } from './ws-handler.js';
 import { hasTmux } from './tmux.js';
 import { handleProxy } from './record-proxy.js';
 import { countRecords, listRecords, getRecord } from './record-store.js';
@@ -98,8 +99,21 @@ export async function createServer(opts: {
     });
   });
 
+  const CMD_HISTORY_DIR = process.env.CMD_HISTORY_DIR || path.resolve(__dirname, '../../data/command-history');
+  const cmdCtx: CmdCtx = { dir: CMD_HISTORY_DIR, sessions: new Map() };
+  const clients = new Set<Parameters<typeof handleConnection>[0]>();
+  const broadcast = (m: import('./protocol.js').ServerMessage) => {
+    const payload = JSON.stringify(m);
+    for (const c of clients) c.send(payload);
+  };
+
   const wss = new WebSocketServer({ server, path: '/ws' });
-  wss.on('connection', (ws) => handleConnection(ws as unknown as Parameters<typeof handleConnection>[0], mgr));
+  wss.on('connection', (ws) => {
+    const wsLike = ws as unknown as Parameters<typeof handleConnection>[0];
+    clients.add(wsLike);
+    ws.on('close', () => { clients.delete(wsLike); });
+    handleConnection(wsLike, mgr, cmdCtx, broadcast);
+  });
   server.on('close', () => mgr.dispose());
 
   return new Promise<{ server: http.Server; port: number }>((resolve) => {
