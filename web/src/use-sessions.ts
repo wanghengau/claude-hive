@@ -74,23 +74,20 @@ export function useSessions(client: WsClient) {
       } else if (msg.type === 'exit') {
         // 会话退出（含点 × 关闭）即从列表移除
         setSessions((s) => s.filter((x) => x.sessionId !== msg.sessionId));
+        setCommands((prev) => {
+          if (!(msg.sessionId in prev)) return prev;
+          const next = { ...prev };
+          delete next[msg.sessionId];
+          return next;
+        });
       } else if (msg.type === 'sessions') {
         setSessions(msg.items);
         setActiveId((cur) => cur ?? (msg.items[0]?.sessionId ?? null));
-        // 刷新/重连恢复：从 localStorage 回填每会话命令历史
-        const restored: Record<string, string[]> = {};
-        for (const item of msg.items) restored[item.sessionId] = client.getCommands(item.sessionId);
-        setCommands(restored);
       } else if (msg.type === 'cwd') {
         setCwds((prev) => (prev[msg.sessionId] === msg.cwd ? prev : { ...prev, [msg.sessionId]: msg.cwd }));
+      } else if (msg.type === 'commands') {
+        setCommands((prev) => (prev[msg.sessionId] === msg.items ? prev : { ...prev, [msg.sessionId]: msg.items }));
       }
-    });
-  }, [client]);
-
-  // 命令成形时刷新该会话的命令历史
-  useEffect(() => {
-    return client.onCommand((sid) => {
-      setCommands((prev) => ({ ...prev, [sid]: client.getCommands(sid) }));
     });
   }, [client]);
 

@@ -25,8 +25,6 @@ class MockWsClient {
   private handlers = new Set<(m: any) => void>();
   send(m: any) { this.sent.push(m); }
   onMessage(h: (m: any) => void) { this.handlers.add(h); return () => { this.handlers.delete(h); }; }
-  onCommand(_h: (sid: string) => void) { return () => {}; }
-  getCommands(_sid: string): string[] { return []; }
   emit(m: any) { this.handlers.forEach((h) => h(m)); }
 }
 
@@ -127,5 +125,35 @@ describe('useSessions', () => {
       ],
     }));
     expect(r2.result.current.sessions.map((s) => s.sessionId)).toEqual(['s2', 's3', 's1']);
+  });
+
+  it('收到 commands 消息更新对应会话命令历史', () => {
+    const client = new MockWsClient() as unknown as WsClient;
+    const { result } = renderHook(() => useSessions(client));
+    act(() => (client as unknown as MockWsClient).emit({
+      type: 'sessions',
+      items: [{ sessionId: 's1', createdAt: 0, exited: false }],
+    }));
+    act(() => (client as unknown as MockWsClient).emit({
+      type: 'commands', sessionId: 's1', items: ['ls', 'pwd'],
+    }));
+    const s1 = result.current.sessions.find((s) => s.sessionId === 's1');
+    expect(s1?.commands).toEqual(['ls', 'pwd']);
+  });
+
+  it('会话 exit 后清掉其 commands', () => {
+    const client = new MockWsClient() as unknown as WsClient;
+    const { result } = renderHook(() => useSessions(client));
+    act(() => (client as unknown as MockWsClient).emit({
+      type: 'sessions',
+      items: [{ sessionId: 's1', createdAt: 0, exited: false }],
+    }));
+    act(() => (client as unknown as MockWsClient).emit({
+      type: 'commands', sessionId: 's1', items: ['ls'],
+    }));
+    act(() => (client as unknown as MockWsClient).emit({
+      type: 'exit', sessionId: 's1', code: 0,
+    }));
+    expect(result.current.sessions.find((s) => s.sessionId === 's1')).toBeUndefined();
   });
 });
