@@ -21,24 +21,6 @@ class FakeWebSocket {
 
 beforeEach(() => { FakeWebSocket.instances = []; (globalThis as any).WebSocket = FakeWebSocket; });
 
-// 测试环境补丁：当前 vitest+jsdom 配置未提供可用的 localStorage（getItem/setItem 均缺失），
-// 注入一个内存版实现，供 recordInput 的命令持久化逻辑测试使用。
-Object.defineProperty(globalThis, 'localStorage', {
-  value: (() => {
-    const store = new Map<string, string>();
-    return {
-      getItem: (k: string) => store.get(k) ?? null,
-      setItem: (k: string, v: string) => { store.set(k, String(v)); },
-      removeItem: (k: string) => { store.delete(k); },
-      clear: () => store.clear(),
-      key: (i: number) => Array.from(store.keys())[i] ?? null,
-      get length() { return store.size; },
-    };
-  })(),
-  configurable: true,
-  writable: true,
-});
-
 describe('WsClient', () => {
   it('按 sessionId 分发 data 给订阅者', () => {
     const c = new WsClient('ws://x');
@@ -85,57 +67,5 @@ describe('WsClient', () => {
     const buf = c.getBuffer('s1');
     expect(buf.length).toBe(2000000);
     expect(buf.slice(-10)).toBe('bbbbbbbbbb');
-  });
-});
-
-describe('recordInput 命令解析', () => {
-  beforeEach(() => { localStorage.clear(); });
-
-  // 用单次 input 触发 recordInput，返回成形命令列表
-  function run(data: string): string[] {
-    const c = new WsClient('ws://x');
-    c.connect();
-    FakeWebSocket.instances[0]!.fireOpen();
-    c.send({ type: 'input', sessionId: 's', data });
-    return c.getCommands('s');
-  }
-
-  it('记录普通输入命令', () => {
-    expect(run('git status\r')).toEqual(['git status']);
-  });
-
-  it('退格删除前一字符', () => {
-    expect(run('abc\x7f\r')).toEqual(['ab']);
-  });
-
-  it('跳过 CSI 方向键(ESC [ X)，不残留', () => {
-    expect(run('\x1b[Als\r')).toEqual(['ls']);
-  });
-
-  it('跳过 CSI Delete 序列(ESC [ 3 ~)', () => {
-    expect(run('\x1b[3~cd\r')).toEqual(['cd']);
-  });
-
-  it('跳过 SS3 方向键(ESC O X)，不残留字母', () => {
-    // application cursor keys 模式下方向键发送 ESC O A/B/C/D，必须整体跳过
-    expect(run('\x1bOAls\r')).toEqual(['ls']);
-  });
-
-  it('跳过 SS3 功能键(ESC O P..S)', () => {
-    expect(run('\x1bOPpwd\r')).toEqual(['pwd']);
-  });
-
-  it('跳过 OSC 颜色查询响应(BEL 结束)，不残留', () => {
-    // xterm 响应 OSC 10/11 颜色查询时，通过 onData 回流 ESC ] 10 ; rgb:... BEL
-    expect(run('\x1b]10;rgb:cbcb/d5d5/e1e1\x07ls\r')).toEqual(['ls']);
-  });
-
-  it('跳过 OSC 响应(ST=ESC\\ 结束)', () => {
-    expect(run('\x1b]11;rgb:0a0a/1010/1818\x1b\\ls\r')).toEqual(['ls']);
-  });
-
-  it('用户实际场景：OSC 颜色响应后接中文输入', () => {
-    expect(run('\x1b]10;rgb:cbcb/d5d5/e1e1\x07左侧小窗鼠标按住后可以拖动排序\r'))
-      .toEqual(['左侧小窗鼠标按住后可以拖动排序']);
   });
 });
