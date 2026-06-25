@@ -34,4 +34,5 @@ export type ServerMessage =
   | { type: 'data'; sessionId: string; payload: string }
   | { type: 'exit'; sessionId: string; code: number }
   | { type: 'sessions'; items: SessionInfo[] }
-  | { type: 'cwd'; sessionId: string; cwd: string };
+  | { type: 'cwd'; sessionId: string; cwd: string }
+  | { type: 'commands'; sessionId: string; items: string[] };
