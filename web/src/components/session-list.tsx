@@ -65,6 +65,13 @@ const Row = memo(function Row({ index, style, data }: { index: number; style: CS
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
     pinnedRef.current = atBottom;
   }, []);
+  const handleMouseLeave = useCallback(() => {
+    pinnedRef.current = true;
+    const el = inputsRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
   return (
     <div style={style} className="row-slot">
       <div
@@ -100,6 +107,7 @@ const Row = memo(function Row({ index, style, data }: { index: number; style: CS
           className="row-inputs"
           onClick={() => data.onSelect(s.sessionId)}
           onWheel={handleWheel}
+          onMouseLeave={handleMouseLeave}
         >
           {cmds.length === 0 ? (
             <div className="row-input-empty">（暂无输入）</div>
