@@ -204,7 +204,8 @@ body {
 .row-inputs {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--bg-term);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -214,6 +215,14 @@ body {
   justify-content: flex-end;
   gap: 2px;
   cursor: pointer;
+}
+.row-inputs::-webkit-scrollbar { width: 6px; }
+.row-inputs::-webkit-scrollbar-thumb {
+  background: var(--text-faint);
+  border-radius: 3px;
+}
+.row-inputs::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
 }
 .row-input-line {
   font-family: var(--mono);
