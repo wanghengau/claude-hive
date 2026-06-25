@@ -92,7 +92,7 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
       // alt screen（如 claude 全屏 TUI）：xterm scrollback 被 alt buffer 遮盖、根本滚不动，
       // 此时拦截滚轮只会让会话彻底无法回看——改为放行滚轮给应用，由 claude 自行翻历史。
       // 仅主 buffer（普通 shell 输出）才拦截滚轮、滚动 xterm scrollback。
-      if (b.type === 'alt') return;
+      if (b.type === 'alternate') return;
       e.preventDefault();
       e.stopImmediatePropagation();
       let lines: number;
