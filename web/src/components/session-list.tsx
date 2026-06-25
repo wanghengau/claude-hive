@@ -1,4 +1,4 @@
-import { useState, memo, type CSSProperties } from 'react';
+import { useState, useRef, memo, type CSSProperties } from 'react';
 import { FixedSizeList as List } from 'react-window';
 import type { SessionWithStatus } from '../use-sessions.js';
 
@@ -38,9 +38,10 @@ interface RowData {
 
 const Row = memo(function Row({ index, style, data }: { index: number; style: CSSProperties; data: RowData }) {
   const s = data.sessions[index];
+  const inputsRef = useRef<HTMLDivElement>(null);
   const statusClass = s.exited ? 'st-exited' : s.running ? 'st-running' : 'st-idle';
   const statusText = s.exited ? '已退出' : s.running ? '运行中' : '等待输入';
-  const cmds = s.commands.slice(-VISIBLE_CMDS);
+  const cmds = s.commands;
   return (
     <div style={style} className="row-slot">
       <div
@@ -71,7 +72,7 @@ const Row = memo(function Row({ index, style, data }: { index: number; style: CS
             {statusText}
           </span>
         </div>
-        <div className="row-inputs" onClick={() => data.onSelect(s.sessionId)}>
+        <div ref={inputsRef} className="row-inputs" onClick={() => data.onSelect(s.sessionId)}>
           {cmds.length === 0 ? (
             <div className="row-input-empty">（暂无输入）</div>
           ) : (
