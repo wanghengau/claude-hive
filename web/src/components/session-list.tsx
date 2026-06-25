@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect, useCallback, memo, type CSSProperties } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, memo, type CSSProperties } from 'react';
 import { FixedSizeList as List } from 'react-window';
 import type { SessionWithStatus } from '../use-sessions.js';
 
@@ -49,20 +49,28 @@ const Row = memo(function Row({ index, style, data }: { index: number; style: CS
       el.scrollTop = el.scrollHeight;
     }
   }, [s.commands.length, s.sessionId]);
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
+  // 用原生 addEventListener(passive:false)而非 React onWheel：React 17+ 把合成 wheel 事件
+  // 注册为 passive listener，合成事件里的 preventDefault 会被浏览器忽略，无法阻止默认滚动
+  // 祖先链（滚到顶后会带动外层 react-window 列表）。passive:false 才能 preventDefault，与
+  // 主窗口终端(main-terminal.tsx)的滚轮拦截方案一致。
+  useEffect(() => {
     const el = inputsRef.current;
     if (!el) return;
-    let dy = e.deltaY;
-    if (e.deltaMode === 1) {
-      dy *= 18; // DOM_DELTA_LINE → px
-    } else if (e.deltaMode === 2) {
-      dy *= el.clientHeight; // DOM_DELTA_PAGE → px
-    }
-    el.scrollTop += dy;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
-    pinnedRef.current = atBottom;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) {
+        dy *= 18; // DOM_DELTA_LINE → px
+      } else if (e.deltaMode === 2) {
+        dy *= el.clientHeight; // DOM_DELTA_PAGE → px
+      }
+      el.scrollTop += dy;
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
+      pinnedRef.current = atBottom;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
   }, []);
   const handleMouseLeave = useCallback(() => {
     pinnedRef.current = true;
@@ -105,7 +113,6 @@ const Row = memo(function Row({ index, style, data }: { index: number; style: CS
           ref={inputsRef}
           className="row-inputs"
           onClick={() => data.onSelect(s.sessionId)}
-          onWheel={handleWheel}
           onMouseLeave={handleMouseLeave}
         >
           {cmds.length === 0 ? (
