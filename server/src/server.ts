@@ -10,6 +10,7 @@ import { hasTmux } from './tmux.js';
 import { handleProxy } from './record-proxy.js';
 import { countRecords, listRecords, getRecord } from './record-store.js';
 import { readQuickCommands, writeQuickCommands } from './quick-commands.js';
+import { remove, prune } from './command-history.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '../../web/dist');
@@ -99,13 +100,24 @@ export async function createServer(opts: {
     });
   });
 
-  const CMD_HISTORY_DIR = process.env.CMD_HISTORY_DIR || path.resolve(__dirname, '../../data/command-history');
-  const cmdCtx: CmdCtx = { dir: CMD_HISTORY_DIR, sessions: new Map() };
+  const COMMANDS_DIR = process.env.COMMANDS_DIR || path.resolve(__dirname, '../../data/commands');
+  const cmdCtx: CmdCtx = { dir: COMMANDS_DIR, sessions: new Map() };
   const clients = new Set<Parameters<typeof handleConnection>[0]>();
   const broadcast = (m: import('./protocol.js').ServerMessage) => {
     const payload = JSON.stringify(m);
     for (const c of clients) c.send(payload);
   };
+
+  // 会话结束(点 × 或 shell 自然退出)即清该会话历史 —— 对应「关闭窗口清理」
+  mgr.onExit((sessionId) => {
+    cmdCtx.sessions.delete(sessionId);
+    remove(COMMANDS_DIR, sessionId);
+  });
+
+  // 启动清孤儿:restore 完成后,删 data/commands/ 里对应 tmux session 已不存在的文件
+  mgr.restored.then(() => {
+    prune(COMMANDS_DIR, new Set(mgr.list().map((s) => s.sessionId)));
+  }).catch(() => { /* restore 失败不阻塞 */ });
 
   const wss = new WebSocketServer({ server, path: '/ws' });
   wss.on('connection', (ws) => {
