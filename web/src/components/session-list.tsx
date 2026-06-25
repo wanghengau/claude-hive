@@ -12,7 +12,6 @@ interface Props {
 }
 
 const ROW_HEIGHT = 172;
-const VISIBLE_CMDS = 5;
 
 function basename(p: string): string {
   if (!p) return '';
