@@ -1,4 +1,4 @@
-import { useState, useRef, memo, type CSSProperties } from 'react';
+import { useState, useRef, useLayoutEffect, memo, type CSSProperties } from 'react';
 import { FixedSizeList as List } from 'react-window';
 import type { SessionWithStatus } from '../use-sessions.js';
 
@@ -39,9 +39,17 @@ interface RowData {
 const Row = memo(function Row({ index, style, data }: { index: number; style: CSSProperties; data: RowData }) {
   const s = data.sessions[index];
   const inputsRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true);
   const statusClass = s.exited ? 'st-exited' : s.running ? 'st-running' : 'st-idle';
   const statusText = s.exited ? '已退出' : s.running ? '运行中' : '等待输入';
   const cmds = s.commands;
+  useLayoutEffect(() => {
+    const el = inputsRef.current;
+    if (!el) return;
+    if (pinnedRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [s.commands.length, s.sessionId]);
   return (
     <div style={style} className="row-slot">
       <div
