@@ -23,6 +23,7 @@ export class PtyManager implements IPtyManager {
   private cwdHandlers = new Set<CwdHandler>();
   private cwdCache = new Map<string, string>();
   private cwdTimer: ReturnType<typeof setInterval> | null = null;
+  restored: Promise<void> = Promise.resolve();
   protected readonly opts: tmux.TmuxOpts;
 
   constructor(opts: { socketName?: string } = {}) {
@@ -30,7 +31,7 @@ export class PtyManager implements IPtyManager {
     this.cwdTimer = setInterval(() => this.pollCwds(), CWD_POLL_MS);
     this.cwdTimer.unref?.();
     // 启动恢复：attach 所有已存在的 wmt-* 会话（server 重启场景）
-    this.restore().catch(() => {});
+    this.restored = this.restore();
   }
 
   private refreshCwd(name: string): void {
