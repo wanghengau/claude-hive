@@ -68,6 +68,10 @@ start() {
     echo "  server:  http://localhost:${SERVER_PORT}"
     echo "  web:     http://localhost:${WEB_PORT}  (端口见 web/vite.config.ts)"
     echo "  日志:    windows-record logs -f"
+    # 启动死亡看门狗：服务进程消失时抓取死亡现场(进程/系统快照)到 death.log
+    local svc_pid; svc_pid="$(cat "$PID_FILE")"
+    nohup "$0" watchdog "$svc_pid" > /dev/null 2>&1 &
+    echo $! > "$RUN_DIR/watchdog.pid"
   else
     echo "启动失败，日志末尾："
     tail -n 30 "$LOG_FILE" 2>/dev/null
@@ -90,7 +94,36 @@ cleanup_strays() {
   pkill -f "${PROJECT_DIR}.*vite" 2>/dev/null                        # 进程名兜底：web dev server (vite + esbuild)
 }
 
+# 死亡看门狗：监控服务 PID，进程消失时把"死亡现场"(全量进程/系统事件/服务日志)
+# 快照写入 death.log，用于排查不明 SIGTERM 来源。由 start() 用 nohup 独立启动，不属于
+# 服务进程组，故服务被杀时看门狗存活、能完成抓取后自退。stop() 会先停看门狗，只有
+# 外部意外 kill(不经 stop) 才会触发 dump。
+watchdog() {
+  local svc_pid="${1:-}"
+  [[ -z "$svc_pid" ]] && { echo "watchdog: 缺少服务 PID" >&2; exit 1; }
+  local death_log="$RUN_DIR/death.log"
+  while kill -0 "$svc_pid" 2>/dev/null; do sleep 2; done
+  {
+    echo "========================================================"
+    echo "[$(date '+%F %T')] 服务 PID=$svc_pid 已消失 —— 死亡现场快照"
+    echo "--- 全量进程 (排查 kill 发送者) ---"
+    ps -axo pid,ppid,user,%cpu,%mem,etime,command 2>/dev/null
+    echo "--- 最近重启/关机 ---"
+    last -5 reboot shutdown 2>/dev/null
+    echo "--- 最近电源事件 ---"
+    pmset -g log 2>/dev/null | tail -8
+    echo "--- 服务日志尾部 30 行 ---"
+    tail -30 "$LOG_FILE" 2>/dev/null
+  } >> "$death_log" 2>&1
+  rm -f "$RUN_DIR/watchdog.pid"
+}
+
 stop() {
+  # 先停看门狗，避免正常停止被误记为"死亡现场"；只有外部意外 kill 才触发 dump
+  if [[ -f "$RUN_DIR/watchdog.pid" ]]; then
+    kill "$(cat "$RUN_DIR/watchdog.pid")" 2>/dev/null
+    rm -f "$RUN_DIR/watchdog.pid"
+  fi
   local pid=""
   [[ -f "$PID_FILE" ]] && pid="$(cat "$PID_FILE" 2>/dev/null)"
   if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
@@ -138,6 +171,7 @@ case "${1:-start}" in
   start)         start ;;
   stop)          stop ;;
   restart)       stop; start ;;
+  watchdog)      watchdog "${2:-}" ;;
   status)        status ;;
   logs)          logs "${2:-}" ;;
   help|-h|--help) usage ;;

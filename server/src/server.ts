@@ -140,6 +140,16 @@ export async function createServer(opts: {
 // 直接运行时启动
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
+  // 捕获 SIGTERM/SIGINT：把"被杀"现场写入 death.log，配合 bin/windows-record 的看门狗
+  // 排查不明 kill 来源。用 appendFileSync 同步写，避免信号处理后进程退出导致异步写丢失。
+  const DEATH_LOG = path.resolve(__dirname, '../../.run/death.log');
+  const logSignal = (sig: string) => {
+    const line = `${new Date().toISOString()} server.ts 收到 ${sig} pid=${process.pid} ppid=${process.ppid}`;
+    console.log(`[signal-capture] ${line}`);
+    try { fs.appendFileSync(DEATH_LOG, line + '\n'); } catch { /* 忽略写入失败 */ }
+  };
+  process.on('SIGTERM', () => { logSignal('SIGTERM'); process.exit(0); });
+  process.on('SIGINT', () => { logSignal('SIGINT'); process.exit(130); });
   createServer({ port: Number(process.env.PORT ?? 4000) }).then(({ port }) => {
     console.log(`listening on http://localhost:${port}`);
   });
