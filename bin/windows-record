@@ -76,31 +76,38 @@ start() {
   fi
 }
 
-stop() {
-  if [[ ! -f "$PID_FILE" ]]; then
-    echo "未运行 (无 pidfile)。"
-    return 0
-  fi
-  local pid; pid="$(cat "$PID_FILE" 2>/dev/null)"
-  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
-    echo "进程已不在 (清理 pidfile)。"
-    rm -f "$PID_FILE"
-    return 0
-  fi
-  echo "停止 (PID $pid)..."
-  kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null   # 杀整个进程组
-  for _ in 1 2 3 4 5 6; do
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 0.5
-  done
-  if kill -0 "$pid" 2>/dev/null; then
-    kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null
-    sleep 0.5
-  fi
-  for p in "$SERVER_PORT" "$WEB_PORT"; do                           # 端口兜底清残留
-    local r; r="$(lsof -ti tcp:"$p" 2>/dev/null)"
+# 兜底清理本项目残留服务进程：端口占用 + 按进程名匹配的 tsx watch / vite。
+# 处理杀进程组后仍漏网的"半死"进程——尤其是不占端口、空转的 tsx watcher：若不清，
+# 下次 src 变化它会重启 server 子进程，与新 server 抢 4000 端口 → EADDRINUSE 崩溃。
+# 用 $PROJECT_DIR 限定匹配范围，避免误杀其他项目的同名进程。
+cleanup_strays() {
+  local p r
+  for p in "$SERVER_PORT" "$WEB_PORT"; do                           # 端口兜底
+    r="$(lsof -ti tcp:"$p" 2>/dev/null)"
     [[ -n "$r" ]] && kill "$r" 2>/dev/null
   done
+  pkill -f "${PROJECT_DIR}.*tsx watch" 2>/dev/null                   # 进程名兜底：空转 tsx watcher
+  pkill -f "${PROJECT_DIR}.*vite" 2>/dev/null                        # 进程名兜底：web dev server (vite + esbuild)
+}
+
+stop() {
+  local pid=""
+  [[ -f "$PID_FILE" ]] && pid="$(cat "$PID_FILE" 2>/dev/null)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    echo "停止 (PID $pid)..."
+    kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null   # 杀整个进程组
+    for _ in 1 2 3 4 5 6; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null
+      sleep 0.5
+    fi
+  else
+    echo "进程已不在 (清理 pidfile + 残留)。"
+  fi
+  cleanup_strays                                                    # 兜底：端口占用 + 半死 watcher
   rm -f "$PID_FILE"
   echo "已停止。"
 }
