@@ -1,6 +1,6 @@
 {
-  "name": "windows-record",
-  "description": "Windows terminal multiplexer with Claude API request recording proxy",
+  "name": "claude-hive",
+  "description": "Multi-window Claude Code manager with optional API recording",
   "workspaces": ["server", "web"],
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"npm -w server run dev\" \"npm -w web run dev\"",

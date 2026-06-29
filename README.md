@@ -1,6 +1,8 @@
-# windows-record
+# claude-hive
 
-**录制 Claude Code 每一次 API 交互，按终端窗口分组，Web 界面随时回看。**
+**多个 Claude Code 同时工作，API 交互按窗口录制回放。**
+
+> 🐝 Hive = 蜂巢，每个窗口一只工蜂，录制就是采蜜。
 
 <!-- screenshot: 主界面截图占位 -->
 
@@ -23,8 +25,8 @@
 
 ### 安装
 ```bash
-git clone https://github.com/wanghengau/windows-record.git
-cd windows-record
+git clone https://github.com/wanghengau/claude-hive.git
+cd claude-hive
 npm install
 
 # 安装守护命令（可选）
