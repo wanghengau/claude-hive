@@ -1,6 +1,6 @@
 {
   "name": "windows-record",
-  "private": true,
+  "description": "Windows terminal multiplexer with Claude API request recording proxy",
   "workspaces": ["server", "web"],
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"npm -w server run dev\" \"npm -w web run dev\"",
