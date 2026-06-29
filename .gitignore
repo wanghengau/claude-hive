@@ -4,3 +4,10 @@ dist/
 data/
 run/
 .run/
+
+# macOS
+.DS_Store
+
+# 微信截图（含 EXIF 元数据，不适合开源）
+微信截图*.png
+WeChat*.png
