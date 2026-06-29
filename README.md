@@ -3,6 +3,7 @@
 **多个 Claude Code 同时工作，API 交互按窗口录制回放。**
 
 > 🐝 Hive = 蜂巢，每个窗口一只工蜂，录制就是采蜜。
+> <img width="2555" height="1285" alt="image" src="https://github.com/user-attachments/assets/1923b650-b5fc-4054-bc06-c43d0f01b312" />
 
 <!-- screenshot: 主界面截图占位 -->
 
