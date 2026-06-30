@@ -121,7 +121,7 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
       }
     };
 
-    containerRef.current.addEventListener('paste', onPaste);
+    containerRef.current.addEventListener('paste', onPaste, true);
 
     // Listen for server's image-pasted response and write @path to terminal
     const offMsg = client.onMessage((msg) => {
@@ -161,7 +161,7 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
 
     return () => {
       containerRef.current?.removeEventListener('wheel', onWheel, { capture: true });
-      containerRef.current?.removeEventListener('paste', onPaste);
+      containerRef.current?.removeEventListener('paste', onPaste, true);
       offMsg();
       ro.disconnect();
       off();
