@@ -128,3 +128,81 @@ export function extractModels(records: AnyRec[]): ModelStat[] {
     .map(([model, count]) => ({ model, count }))
     .sort((a, b) => b.count - a.count);
 }
+
+export interface AnalyzeOpts { window?: string; limit?: number }
+
+// 枚举 logDir 下合法 window 目录（含日期子目录的才算；commands/ 等无日期子目录自然排除，
+// 与 record-store.countRecords 一致）
+function listWindowDirs(logDir: string): string[] {
+  let wids: string[] = [];
+  try { wids = fs.readdirSync(logDir); } catch { return []; }
+  return wids.filter((w) => /^[A-Za-z0-9_-]+$/.test(w));
+}
+
+// 主入口：遍历录制 → 按 ts 倒序取最近 limit 条 → 聚合 HarnessProfile
+export function analyzeRecords(logDir: string, opts: AnalyzeOpts = {}): HarnessProfile {
+  const limit = opts.limit ?? 500;
+  const windowScope = opts.window || 'all';
+  const wids = opts.window ? [sanitizeWindowId(opts.window)] : listWindowDirs(logDir);
+
+  const all: { ts: string; rec: AnyRec }[] = [];
+  for (const wid of wids) {
+    const wRoot = path.join(logDir, wid);
+    let dayDirs: string[] = [];
+    try { dayDirs = fs.readdirSync(wRoot).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)); } catch { continue; }
+    for (const date of dayDirs) {
+      let files: string[] = [];
+      try { files = fs.readdirSync(path.join(wRoot, date)); } catch { continue; }
+      for (const f of files) {
+        if (!f.endsWith('.json')) continue;
+        try {
+          const rec = JSON.parse(fs.readFileSync(path.join(wRoot, date, f), 'utf8'));
+          if (rec && typeof rec === 'object') all.push({ ts: rec.ts ?? `${date}${f}`, rec });
+        } catch { /* 坏文件跳过 */ }
+      }
+    }
+  }
+
+  all.sort((a, b) => b.ts.localeCompare(a.ts));
+  const records = all.slice(0, limit).map((x) => x.rec);
+
+  const system = extractSystem(records);
+  const tools = extractTools(records);
+  const toolsTokens = tools.reduce((s, t) => s + t.descTokens + t.schemaTokens, 0);
+
+  return {
+    sampleSize: records.length,
+    windowScope,
+    system,
+    tools,
+    tokenOverhead: { systemTokens: system.rulesTokens, toolsTokens, total: system.rulesTokens + toolsTokens },
+    cacheStats: computeCacheStats(records),
+    injections: extractInjections(records),
+    models: extractModels(records),
+  };
+}
+
+// 组装给 LLM 的分析 prompt
+export function buildInterpretPrompt(p: HarnessProfile): string {
+  const L: string[] = [];
+  L.push('下面是一个 Claude Code harness（驱动 Claude 的外壳）的 API 录制结构数据。');
+  L.push('请基于这些数据分析：这个 harness 是怎么设计的——设计哲学、能力边界、上下文与缓存管理策略。中文，分点，务实。\n');
+  L.push(`采样 ${p.sampleSize} 条录制（范围：${p.windowScope}）\n`);
+  L.push('## 身份声明');
+  L.push(p.system.identity || '（无）');
+  L.push('\n## 完整规则（system prompt）');
+  L.push(p.system.rules || '（无）');
+  L.push('\n## 能力集（工具）');
+  for (const t of p.tools) L.push(`- ${t.name}（${t.descTokens} tok）：${t.desc}`);
+  L.push('\n## 固定 token 开销');
+  L.push(`system ${p.tokenOverhead.systemTokens} / tools ${p.tokenOverhead.toolsTokens} / 合计 ${p.tokenOverhead.total}`);
+  L.push('\n## 缓存策略');
+  L.push(`平均 cache_read ${p.cacheStats.avgCacheRead} / 平均 input ${p.cacheStats.avgInput} / 命中率 ${Math.round(p.cacheStats.hitRate * 100)}%`);
+  if (p.injections.length) {
+    L.push('\n## 上下文注入（role=system 消息）');
+    for (const i of p.injections) L.push(`- ${i.chars} 字符 / ${i.tokens} tok：${i.preview}…`);
+  }
+  L.push('\n## 模型分布');
+  for (const m of p.models) L.push(`- ${m.model}：${m.count} 次`);
+  return L.join('\n');
+}
