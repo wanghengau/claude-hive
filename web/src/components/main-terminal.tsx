@@ -123,6 +123,14 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
 
     containerRef.current.addEventListener('paste', onPaste);
 
+    // Listen for server's image-pasted response and write @path to terminal
+    const offMsg = client.onMessage((msg) => {
+      if (msg.type === 'image-pasted' && msg.sessionId === sessionId) {
+        // Send @path to CLI, without auto-return (no \r)
+        client.send({ type: 'input', sessionId, data: `@${msg.path}` });
+      }
+    });
+
     // 鼠标滚轮：滚动 xterm 的 scrollback 历史（回看整个会话输出），而不是发给应用——
     // claude 会截获滚轮去滚动它自己的输入框。tmux 未开 mouse 不拦截，滚轮会透传给 claude。
     // 在捕获阶段（capture）抢先处理：stopImmediatePropagation 阻止 xterm 内层元素的 wheel
@@ -154,6 +162,7 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
     return () => {
       containerRef.current?.removeEventListener('wheel', onWheel, { capture: true });
       containerRef.current?.removeEventListener('paste', onPaste);
+      offMsg();
       ro.disconnect();
       off();
       inputOff.dispose();
