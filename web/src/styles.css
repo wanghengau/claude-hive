@@ -565,3 +565,41 @@ details > summary::before {
 }
 details[open] > summary::before { transform: rotate(90deg); }
 details[open] > summary { border-bottom: 1px solid var(--border); }
+
+/* ── analyze-view（harness 结构分析）── */
+.brand-analyze { margin-left: 6px; padding: 2px 8px; font-size: 12px; background: var(--bg-elev); color: var(--text-dim); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.brand-analyze:hover { color: var(--accent); border-color: var(--accent-line); }
+.analyze-view { display: flex; flex-direction: column; height: 100%; }
+.az-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+.az-back { background: none; border: none; color: var(--text-dim); cursor: pointer; font-family: var(--sans); }
+.az-back:hover { color: var(--accent); }
+.az-title { font-weight: 600; color: var(--text); }
+.az-sub { color: var(--text-faint); font-size: 12px; }
+.az-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.az-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.az-card h3 { font-size: 13px; color: var(--accent); margin-bottom: 10px; }
+.az-identity { color: var(--blue); margin-bottom: 8px; }
+.az-pre { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; overflow-x: auto; color: var(--text-dim); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.az-tools { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
+.az-tools li { display: flex; justify-content: space-between; padding: 4px 8px; background: var(--bg-input); border-radius: var(--radius-sm); }
+.az-tool-name { color: var(--blue); }
+.az-tool-tok { color: var(--text-faint); font-size: 11px; }
+.az-kv-grid .az-kv { display: flex; flex-direction: column; }
+.az-kv span { color: var(--text-faint); font-size: 11px; }
+.az-kv b { color: var(--text); font-size: 16px; }
+.az-kv-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.az-inj { margin-bottom: 8px; }
+.az-inj span { color: var(--purple); font-size: 11px; }
+.az-models { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.az-models li { display: flex; justify-content: space-between; padding: 2px 0; }
+.az-models span { color: var(--text-dim); }
+.az-models b { color: var(--accent); }
+.az-gen { padding: 8px 16px; background: var(--accent); color: var(--accent-ink); border: none; border-radius: var(--radius-sm); cursor: pointer; font-family: var(--sans); font-weight: 600; }
+.az-gen:hover:not(:disabled) { background: var(--accent-hover); }
+.az-gen:disabled { opacity: 0.5; cursor: not-allowed; }
+.az-interp { margin-top: 12px; }
+.az-fallback { margin-top: 12px; }
+.az-fallback p { color: var(--amber); margin-bottom: 8px; }
+.az-fallback button { margin-bottom: 8px; padding: 4px 12px; background: var(--bg-elev); color: var(--text-dim); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.az-empty { color: var(--text-faint); font-style: italic; padding: 16px; }
+@media (max-width: 720px) { .az-kv-grid { grid-template-columns: repeat(3, 1fr); } }

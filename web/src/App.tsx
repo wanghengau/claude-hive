@@ -5,6 +5,7 @@ import { SessionList } from './components/session-list.js';
 import { MainTerminal, type MainTerminalHandle } from './components/main-terminal.js';
 import { QuickInput } from './components/quick-input.js';
 import { RecordView } from './components/record-view.js';
+import { AnalyzeView } from './components/analyze-view.js';
 
 const WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
 
@@ -24,6 +25,7 @@ export function App() {
   const active = sessions.find((s) => s.sessionId === activeId) ?? null;
   const mainRef = useRef<MainTerminalHandle>(null);
   const [recordViewId, setRecordViewId] = useState<string | null>(null);
+  const [showAnalyze, setShowAnalyze] = useState(false);
 
   useEffect(() => {
     // 连接打开后再 list，避免连接未就绪时发送被丢弃；刷新 / 断线重连后恢复会话与历史
@@ -36,6 +38,7 @@ export function App() {
         <div className="sidebar-head">
           <span className="brand">TERMINAL</span>
           <button onClick={() => create(80, 24)}>+ 新建</button>
+          <button className="brand-analyze" onClick={() => setShowAnalyze(true)}>🔧 分析</button>
         </div>
         <SessionList
           sessions={sessions}
@@ -47,7 +50,9 @@ export function App() {
         />
       </aside>
       <main className="main">
-        {recordViewId ? (
+        {showAnalyze ? (
+          <AnalyzeView onBack={() => setShowAnalyze(false)} />
+        ) : recordViewId ? (
           <RecordView windowId={recordViewId} onBack={() => setRecordViewId(null)} />
         ) : (
           <>
