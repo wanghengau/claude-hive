@@ -3,6 +3,20 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { WsClient } from '../ws-client.js';
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // data URL format: data:image/png;base64,XXXXX — extract part after comma
+      const base64 = result.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
 interface Props {
   client: WsClient;
   sessionId: string | null;
@@ -79,6 +93,36 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
     const off = client.subscribeData(sessionId, (_sid, data) => term.write(data));
     const inputOff = term.onData((data) => client.send({ type: 'input', sessionId, data }));
 
+    // Intercept paste: detect images and send to server
+    const onPaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const blob = item.getAsFile();
+          if (!blob) continue;
+
+          // Check size (5MB limit)
+          if (blob.size > 5 * 1024 * 1024) {
+            console.warn('[paste] Image too large:', blob.size, 'bytes');
+            return;
+          }
+
+          try {
+            const base64 = await blobToBase64(blob);
+            client.send({ type: 'paste-image', sessionId, data: base64, mimeType: item.type });
+          } catch (err) {
+            console.warn('[paste] Failed to read image:', err);
+          }
+          return;
+        }
+      }
+    };
+
+    containerRef.current.addEventListener('paste', onPaste);
+
     // 鼠标滚轮：滚动 xterm 的 scrollback 历史（回看整个会话输出），而不是发给应用——
     // claude 会截获滚轮去滚动它自己的输入框。tmux 未开 mouse 不拦截，滚轮会透传给 claude。
     // 在捕获阶段（capture）抢先处理：stopImmediatePropagation 阻止 xterm 内层元素的 wheel
@@ -109,6 +153,7 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
 
     return () => {
       containerRef.current?.removeEventListener('wheel', onWheel, { capture: true });
+      containerRef.current?.removeEventListener('paste', onPaste);
       ro.disconnect();
       off();
       inputOff.dispose();
