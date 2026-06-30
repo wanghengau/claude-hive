@@ -11,6 +11,8 @@ import { handleProxy } from './record-proxy.js';
 import { countRecords, listRecords, getRecord } from './record-store.js';
 import { readQuickCommands, writeQuickCommands } from './quick-commands.js';
 import { remove, prune } from './command-history.js';
+import { analyzeRecords, buildInterpretPrompt } from './analyzer.js';
+import { interpretProfile, NoAnalyzerKeyError } from './llm-client.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '../../web/dist');
@@ -36,6 +38,9 @@ export async function createServer(opts: {
   const RECORD_LOG_DIR = process.env.RECORD_LOG_DIR || path.resolve(__dirname, '../../data');
   const RECORD_MAX_BYTES = parseInt(process.env.RECORD_MAX_BYTES || String(10 * 1024 * 1024), 10);
   const RECORD_INJECT_WS = process.env.RECORD_INJECT_WEBSEARCH !== '0';
+  const ANALYZER_API_KEY = process.env.ANALYZER_API_KEY || '';
+  const ANALYZER_TARGET = process.env.ANALYZER_TARGET || RECORD_TARGET;
+  const ANALYZER_MODEL = process.env.ANALYZER_MODEL || 'glm-5v-turbo';
   const QUICK_COMMANDS_FILE = opts.quickCommandsFile
     || process.env.QUICK_COMMANDS_FILE
     || path.resolve(__dirname, '../../quick-commands.json');
@@ -82,6 +87,35 @@ export async function createServer(opts: {
         return;
       }
       return json(405, { error: 'method not allowed' });
+    }
+    if (method === 'GET' && url.startsWith('/api/analyze/harness')) {
+      const u = new URL(url, 'http://localhost');
+      const json = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
+      const window = u.searchParams.get('window') || undefined;
+      const limitRaw = u.searchParams.get('limit');
+      const limit = limitRaw ? parseInt(limitRaw, 10) : undefined;
+      return json(200, analyzeRecords(RECORD_LOG_DIR, { window, limit }));
+    }
+    if (url === '/api/analyze/interpret' && method === 'POST') {
+      const json = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
+      let body = '';
+      req.on('data', (c) => { body += c.toString('utf8'); });
+      req.on('end', () => {
+        let parsed: { window?: string; limit?: number; profile?: unknown } = {};
+        try { parsed = JSON.parse(body); } catch { return json(400, { error: 'invalid json' }); }
+        const profile = (parsed.profile && typeof parsed.profile === 'object')
+          ? parsed.profile as import('./analyzer.js').HarnessProfile
+          : analyzeRecords(RECORD_LOG_DIR, { window: parsed.window, limit: parsed.limit });
+        interpretProfile(profile, { apiKey: ANALYZER_API_KEY, target: ANALYZER_TARGET, model: ANALYZER_MODEL })
+          .then((text) => json(200, { text }))
+          .catch((e: unknown) => {
+            const msg = e instanceof Error ? e.message : String(e);
+            const isNoKey = e instanceof NoAnalyzerKeyError || /ANALYZER_API_KEY/.test(msg);
+            // 永远给一条出路：缺 key 或调用失败都降级为可复制 prompt
+            json(200, { error: isNoKey ? 'no_analyzer_key' : 'interpret_failed', message: isNoKey ? undefined : msg, fallbackPrompt: buildInterpretPrompt(profile) });
+          });
+      });
+      return;
     }
     if (method !== 'GET') {
       handleProxy(req, res, { target: RECORD_TARGET, logDir: RECORD_LOG_DIR, maxBytes: RECORD_MAX_BYTES, injectWebsearch: RECORD_INJECT_WS });
