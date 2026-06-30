@@ -16,8 +16,15 @@ export interface InterpretOpts {
   timeoutMs?: number;
 }
 
+export interface AnalyzeRequestBody {
+  model: string;
+  max_tokens: number;
+  system: string;
+  messages: Array<{ role: string; content: string }>;
+}
+
 // 纯函数：拼上游 URL + 请求体（便于单测，无网络）
-export function buildAnalyzeRequest(profile: HarnessProfile, opts: InterpretOpts): { url: string; body: Record<string, unknown> } {
+export function buildAnalyzeRequest(profile: HarnessProfile, opts: InterpretOpts): { url: string; body: AnalyzeRequestBody } {
   const base = new URL(opts.target);
   const basePath = base.pathname.replace(/\/+$/, '');
   const url = new URL(basePath + '/v1/messages', base.origin).toString();
