@@ -33,3 +33,17 @@ export interface RecordSummary {
   out: number;
 }
 export type RecordCounts = Record<string, number>;
+
+export interface ToolStat { name: string; desc: string; descTokens: number; schemaTokens: number }
+export interface Injection { chars: number; tokens: number; preview: string }
+export interface ModelStat { model: string; count: number }
+export interface HarnessProfile {
+  sampleSize: number;
+  windowScope: string;
+  system: { identity: string; rules: string; rulesTokens: number };
+  tools: ToolStat[];
+  tokenOverhead: { systemTokens: number; toolsTokens: number; total: number };
+  cacheStats: { avgCacheRead: number; avgInput: number; hitRate: number };
+  injections: Injection[];
+  models: ModelStat[];
+}
