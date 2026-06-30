@@ -101,6 +101,7 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
       for (const item of items) {
         if (item.type.startsWith('image/')) {
           e.preventDefault();
+          e.stopImmediatePropagation(); // Stop xterm.js from also handling the paste
           const blob = item.getAsFile();
           if (!blob) continue;
 
@@ -122,6 +123,12 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
     };
 
     containerRef.current.addEventListener('paste', onPaste, true);
+
+    // Also listen on xterm's internal textarea (where paste actually happens)
+    const textarea = containerRef.current.querySelector('textarea');
+    if (textarea) {
+      textarea.addEventListener('paste', onPaste, true);
+    }
 
     // Listen for server's image-pasted response and write @path to terminal
     const offMsg = client.onMessage((msg) => {
@@ -162,6 +169,7 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
     return () => {
       containerRef.current?.removeEventListener('wheel', onWheel, { capture: true });
       containerRef.current?.removeEventListener('paste', onPaste, true);
+      textarea?.removeEventListener('paste', onPaste, true);
       offMsg();
       ro.disconnect();
       off();
