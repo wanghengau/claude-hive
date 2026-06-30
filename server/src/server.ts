@@ -88,6 +88,7 @@ export async function createServer(opts: {
       }
       return json(405, { error: 'method not allowed' });
     }
+    // ── analyze 路由必须在 handleProxy 之前，否则 POST 会被代理吞掉 ──
     if (method === 'GET' && url.startsWith('/api/analyze/harness')) {
       const u = new URL(url, 'http://localhost');
       const json = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
@@ -99,8 +100,13 @@ export async function createServer(opts: {
     if (url === '/api/analyze/interpret' && method === 'POST') {
       const json = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
       let body = '';
-      req.on('data', (c) => { body += c.toString('utf8'); });
+      let tooBig = false;
+      req.on('data', (c) => {
+        body += c.toString('utf8');
+        if (body.length > 256 * 1024) tooBig = true;
+      });
       req.on('end', () => {
+        if (tooBig) return json(413, { error: 'payload too large' });
         let parsed: { window?: string; limit?: number; profile?: unknown } = {};
         try { parsed = JSON.parse(body); } catch { return json(400, { error: 'invalid json' }); }
         const profile = (parsed.profile && typeof parsed.profile === 'object')
