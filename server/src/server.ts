@@ -124,7 +124,7 @@ export async function createServer(opts: {
     const wsLike = ws as unknown as Parameters<typeof handleConnection>[0];
     clients.add(wsLike);
     ws.on('close', () => { clients.delete(wsLike); });
-    handleConnection(wsLike, mgr, cmdCtx, broadcast);
+    handleConnection(wsLike, mgr, cmdCtx, broadcast).catch((err) => console.error('ws handler error:', err));
   });
   server.on('close', () => mgr.dispose());
 
