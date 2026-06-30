@@ -10,7 +10,8 @@ export type ClientMessage =
   | { type: 'input'; sessionId: string; data: string }
   | { type: 'resize'; sessionId: string; cols: number; rows: number }
   | { type: 'close'; sessionId: string }
-  | { type: 'list' };
+  | { type: 'list' }
+  | { type: 'paste-image'; sessionId: string; data: string; mimeType: string };
 
 export type ServerMessage =
   | { type: 'created'; sessionId: string }
@@ -18,7 +19,9 @@ export type ServerMessage =
   | { type: 'exit'; sessionId: string; code: number }
   | { type: 'sessions'; items: SessionInfo[] }
   | { type: 'cwd'; sessionId: string; cwd: string }
-  | { type: 'commands'; sessionId: string; items: string[] };
+  | { type: 'commands'; sessionId: string; items: string[] }
+  | { type: 'image-pasted'; sessionId: string; path: string }
+  | { type: 'error'; sessionId: string; message: string };
 
 export interface RecordSummary {
   date: string;
