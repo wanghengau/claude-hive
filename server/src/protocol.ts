@@ -15,7 +15,8 @@ export interface IPtyManager {
   resize(sessionId: string, cols: number, rows: number): void;
   close(sessionId: string): void;
   list(): SessionInfo[];
-  getRingBuffer(sessionId: string): string;
+  // pane 原始流尾部（pipe-pane 导出，连接时回放给前端，与真终端收到的字节一致）
+  getRawTail(sessionId: string): string;
   getCwd(sessionId: string): string;
   onData(h: DataHandler): () => void;
   onExit(h: ExitHandler): () => void;

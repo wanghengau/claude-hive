@@ -23,6 +23,13 @@ interface Props {
   reportSize: (sessionId: string, cols: number, rows: number) => void;
 }
 
+// 过滤 alt screen 切换（ESC[?1049h/l）：让 claude 等全屏 TUI 留在主 buffer——
+// 其流式输出固化为 scrollback（真终端不进 alt screen 时的可回看语义），画面不被
+// alt buffer 遮盖。与 ws-client 对实时流的处理保持一致。
+function stripAltScreen(s: string): string {
+  return s.replace(/\x1b\[\?1049[hl]/g, '');
+}
+
 export interface MainTerminalHandle {
   focus: () => void;
 }
@@ -101,7 +108,6 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
       for (const item of items) {
         if (item.type.startsWith('image/')) {
           e.preventDefault();
-          e.stopImmediatePropagation(); // Stop xterm.js from also handling the paste
           const blob = item.getAsFile();
           if (!blob) continue;
 
@@ -122,54 +128,20 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
       }
     };
 
-    containerRef.current.addEventListener('paste', onPaste, true);
-
-    // Also listen on xterm's internal textarea (where paste actually happens)
-    const textarea = containerRef.current.querySelector('textarea');
-    if (textarea) {
-      textarea.addEventListener('paste', onPaste, true);
-    }
+    containerRef.current.addEventListener('paste', onPaste);
 
     // Listen for server's image-pasted response and write @path to terminal
     const offMsg = client.onMessage((msg) => {
-      if (msg.type === 'image-pasted' && msg.sessionId === sessionId) {
+      if (!('sessionId' in msg) || msg.sessionId !== sessionId) return;
+      if (msg.type === 'image-pasted') {
         // Send @path to CLI, without auto-return (no \r)
         client.send({ type: 'input', sessionId, data: `@${msg.path}` });
       }
     });
 
-    // 鼠标滚轮：滚动 xterm 的 scrollback 历史（回看整个会话输出），而不是发给应用——
-    // claude 会截获滚轮去滚动它自己的输入框。tmux 未开 mouse 不拦截，滚轮会透传给 claude。
-    // 在捕获阶段（capture）抢先处理：stopImmediatePropagation 阻止 xterm 内层元素的 wheel
-    // 监听（即把滚轮作为鼠标报告发给应用），preventDefault 阻止浏览器默认滚动（需 passive:false），
-    // 再手动 term.scrollLines 滚动历史。只拦滚轮，点击/选择/拖拽不受影响。
-    // 像素模式(deltaMode=0)下触控板/高精度鼠标单次 deltaY 很小（常 <25px），直接 /25 取整会得 0
-    // 导致完全不滚动；因此累积位移，每满一行高(~25px)才滚一行，余数留到下次。
-    let wheelAccum = 0;
-    const onWheel = (e: WheelEvent) => {
-      const b = term.buffer.active;
-      // alt screen（如 claude 全屏 TUI）：xterm scrollback 被 alt buffer 遮盖、根本滚不动，
-      // 此时拦截滚轮只会让会话彻底无法回看——改为放行滚轮给应用，由 claude 自行翻历史。
-      // 仅主 buffer（普通 shell 输出）才拦截滚轮、滚动 xterm scrollback。
-      if (b.type === 'alternate') return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      let lines: number;
-      if (e.deltaMode === 1) lines = e.deltaY;                   // DOM_DELTA_LINE：已是行数
-      else if (e.deltaMode === 2) lines = e.deltaY * term.rows;  // DOM_DELTA_PAGE：换算成行
-      else {                                                      // DOM_DELTA_PIXEL：累积折算
-        wheelAccum += e.deltaY;
-        lines = Math.trunc(wheelAccum / 25);
-        wheelAccum -= lines * 25;
-      }
-      if (lines !== 0) term.scrollLines(lines);
-    };
-    containerRef.current.addEventListener('wheel', onWheel, { capture: true, passive: false });
 
     return () => {
-      containerRef.current?.removeEventListener('wheel', onWheel, { capture: true });
-      containerRef.current?.removeEventListener('paste', onPaste, true);
-      textarea?.removeEventListener('paste', onPaste, true);
+      containerRef.current?.removeEventListener('paste', onPaste);
       offMsg();
       ro.disconnect();
       off();
@@ -178,6 +150,7 @@ export const MainTerminal = forwardRef<MainTerminalHandle, Props>(function MainT
       termRef.current = null;
     };
   }, [client, sessionId, reportSize]);
+
 
   if (!sessionId) return <div className="main-empty">选择或新建一个终端会话</div>;
   return <div className="main-terminal" ref={containerRef} />;

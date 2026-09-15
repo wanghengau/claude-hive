@@ -1,11 +1,16 @@
 import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn, type IPty } from 'node-pty';
-import { RingBuffer } from './ring-buffer.js';
 import * as tmux from './tmux.js';
+import { startPipePane, stopPipePane, removeRawLog, readRawTail, rawLogPath } from './raw-log.js';
 import type { CwdHandler, DataHandler, ExitHandler, IPtyManager, SessionInfo } from './protocol.js';
 
-const RING_MAX = 1024 * 1024;
 const CWD_POLL_MS = 3000;
+// pane 原始流（pipe-pane 导出）目录：历史回看的数据源，与真终端收到的字节一致
+const RAW_DIR = process.env.RAW_LOG_DIR
+  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.run/raw');
 
 interface Session {
   id: string;
@@ -13,11 +18,12 @@ interface Session {
   createdAt: number;
   exited: boolean;
   exitCode?: number;
-  ring: RingBuffer;
 }
 
 export class PtyManager implements IPtyManager {
   private sessions = new Map<string, Session>();
+  // 每会话一个 raw 文件增量轮询定时器（数据源推送给前端）
+  private rawWatchers = new Map<string, ReturnType<typeof setInterval>>();
   private dataHandlers = new Set<DataHandler>();
   private exitHandlers = new Set<ExitHandler>();
   private cwdHandlers = new Set<CwdHandler>();
@@ -72,25 +78,49 @@ export class PtyManager implements IPtyManager {
   // spawn attach 进程并接入 ring buffer + handlers（create 与 restore 共用）
   protected spawnAttach(name: string, cols = 80, rows = 24): Session {
     const pty = spawn('tmux', tmux.attachArgs(this.opts, name), { cols, rows });
-    const session: Session = { id: name, pty, createdAt: Date.now(), exited: false, ring: new RingBuffer(RING_MAX) };
-    // attach 进程只接收当前 viewport，不含 scrollback 历史；主动 capture-pane 取回 tmux 保存的历史灌入 ring，
-    // 使 server 重启后重新 attach（restore）也能恢复历史，刷新浏览器后可滚动回看。必须在 onData 注册前 push，
-    // 保证重放顺序为「历史 → 实时流」。
-    const history = tmux.capturePaneSync(this.opts, name);
-    if (history) session.ring.push(history);
-    pty.onData((data) => {
-      session.ring.push(data);
-      this.dataHandlers.forEach((h) => h(name, data));
-    });
+    const session: Session = { id: name, pty, createdAt: Date.now(), exited: false };
+    // 开启 pane 原始流导出（重复调用替换旧 pipe 且 append 续写同一文件）。
+    // 前端数据源 = 原始流（应用写给 pty 的字节，与真终端收到的一致）：claude 等
+    // TUI 的流式输出在 xterm 主 buffer 固化进 scrollback（剥 1049 由前端 ws-client
+    // 做），滚轮回看 = 原生滚动。attach 流（全屏 diff）只用于维持 attach 进程，不推前端。
+    startPipePane(this.opts.socketName, name, RAW_DIR);
+    // 轮询 raw 文件增量推送前端（100ms；macOS fs.watch 的 fsevents 怪癖多，轮询更稳）
+    this.watchRaw(name);
     pty.onExit(({ exitCode }) => {
       session.exited = true;
       session.exitCode = exitCode;
       this.exitHandlers.forEach((h) => h(name, exitCode));
+      this.unwatchRaw(name);
       this.sessions.delete(name);
     });
     this.sessions.set(name, session);
     this.refreshCwd(name);
     return session;
+  }
+
+  /** 轮询会话 raw 文件增量，经 dataHandlers 推送前端（数据源=pipe-pane 原始流） */
+  private watchRaw(name: string): void {
+    const file = rawLogPath(RAW_DIR, name);
+    let offset = 0;
+    try { offset = fs.statSync(file).size; } catch { /* 文件未创建，从 0 开始 */ }
+    const timer = setInterval(() => {
+      let size = 0;
+      try { size = fs.statSync(file).size; } catch { return; }
+      if (size <= offset) return;
+      const chunk = Buffer.alloc(size - offset);
+      const fd = fs.openSync(file, 'r');
+      try { fs.readSync(fd, chunk, 0, chunk.length, offset); } finally { fs.closeSync(fd); }
+      offset = size;
+      const data = chunk.toString('utf8');
+      this.dataHandlers.forEach((h) => h(name, data));
+    }, 100);
+    timer.unref?.();
+    this.rawWatchers.set(name, timer);
+  }
+
+  private unwatchRaw(name: string): void {
+    const timer = this.rawWatchers.get(name);
+    if (timer) { clearInterval(timer); this.rawWatchers.delete(name); }
   }
 
   private async restore(): Promise<void> {
@@ -99,6 +129,18 @@ export class PtyManager implements IPtyManager {
       if (this.sessions.has(name)) continue;
       this.spawnAttach(name);
     }
+  }
+
+  /** 删除 .run/raw 里已无对应会话的原始流文件。由 server 启动后调用一次——
+   * 不放 restore()：多实例共享目录时（测试并发）会互删对方正在写的文件 */
+  pruneOrphanRawLogs(): void {
+    const valid = new Set(this.list().map((s) => s.sessionId));
+    try {
+      for (const f of fs.readdirSync(RAW_DIR)) {
+        const m = f.match(/^([A-Za-z0-9_-]+)\.raw$/);
+        if (m && !valid.has(m[1])) removeRawLog(RAW_DIR, m[1]);
+      }
+    } catch { /* 目录不存在等忽略 */ }
   }
 
   create(opts: { cols: number; rows: number; cwd?: string }): string {
@@ -131,6 +173,10 @@ export class PtyManager implements IPtyManager {
   }
 
   close(sessionId: string): void {
+    this.unwatchRaw(sessionId);
+    // 先关 pipe-pane 并删除原始流文件（会话销毁即清理，对称）
+    stopPipePane(this.opts.socketName, sessionId);
+    removeRawLog(RAW_DIR, sessionId);
     // 先销毁 tmux 会话（pty.kill 只 detach，会话会保留——不符合"销毁"语义）
     tmux.killSessionSync(this.opts, sessionId);
     const s = this.sessions.get(sessionId);
@@ -146,8 +192,8 @@ export class PtyManager implements IPtyManager {
     }));
   }
 
-  getRingBuffer(sessionId: string): string {
-    return this.sessions.get(sessionId)?.ring.toString() ?? '';
+  getRawTail(sessionId: string): string {
+    return readRawTail(RAW_DIR, sessionId);
   }
 
   getCwd(sessionId: string): string {
@@ -169,6 +215,7 @@ export class PtyManager implements IPtyManager {
 
   dispose(): void {
     if (this.cwdTimer) { clearInterval(this.cwdTimer); this.cwdTimer = null; }
+    for (const name of this.rawWatchers.keys()) this.unwatchRaw(name);
     for (const s of this.sessions.values()) {
       if (!s.exited) { try { s.pty.kill(); } catch { /* 已退出 */ } }
     }

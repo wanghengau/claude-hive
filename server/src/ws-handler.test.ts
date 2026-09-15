@@ -15,7 +15,7 @@ class FakePtyManager implements IPtyManager {
   private dataHandler?: (sid: string, data: string) => void;
   private exitHandler?: (sid: string, code: number) => void;
   private cwdHandler?: (sid: string, cwd: string) => void;
-  rings = new Map<string, string>();
+  raws = new Map<string, string>();
 
   create(opts: { cols: number; rows: number; cwd?: string }): string {
     const id = 's' + (this.creates.length + 1);
@@ -26,7 +26,7 @@ class FakePtyManager implements IPtyManager {
   resize(sessionId: string, cols: number, rows: number) { this.resizes.push({ sessionId, cols, rows }); }
   close(sessionId: string) { this.closes.push(sessionId); }
   list(): SessionInfo[] { this.listed = true; return [{ sessionId: 's1', createdAt: 0, exited: false }]; }
-  getRingBuffer(sessionId: string): string { return this.rings.get(sessionId) ?? ''; }
+  getRawTail(sessionId: string): string { return this.raws.get(sessionId) ?? ''; }
   getCwd(_sessionId: string): string { return ''; }
   onData(h: (sid: string, data: string) => void) { this.dataHandler = h; return () => {}; }
   onExit(h: (sid: string, code: number) => void) { this.exitHandler = h; return () => {}; }
@@ -93,9 +93,11 @@ describe('ws-handler', () => {
     expect(mgr.closes).toEqual(['s1']);
   });
 
-  it('list 回 sessions 并回放 ring buffer', () => {
+
+
+  it('list 回 sessions 并回放 raw 原始流尾部', () => {
     const mgr = new FakePtyManager();
-    mgr.rings.set('s1', 'REPLAY');
+    mgr.raws.set('s1', 'REPLAY');
     const ws = makeFakeWs();
     handleConnection(ws as any, mgr, cmdCtx, broadcast);
     ws.emit('message', JSON.stringify({ type: 'list' }));

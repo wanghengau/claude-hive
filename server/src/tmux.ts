@@ -117,3 +117,47 @@ export function capturePaneSync(opts: TmuxOpts, name: string): string {
 export function attachArgs(opts: TmuxOpts, name: string): string[] {
   return [...baseArgs(opts), 'attach', '-t', name];
 }
+
+// pane 是否处于 alternate screen（vim/less 等全屏程序）
+export async function isAltScreen(opts: TmuxOpts, name: string): Promise<boolean> {
+  try {
+    const { stdout } = await runAsync(
+      BIN,
+      [...baseArgs(opts), 'display-message', '-p', '-t', name, '#{alternate_on}'],
+      { encoding: 'utf-8', timeout: 2000 },
+    );
+    return stdout.trim() === '1';
+  } catch {
+    return false;
+  }
+}
+
+// 滚轮回看：tmux 才是历史的权威持有者（attach 只发全屏重绘、不透传输出流，xterm 的
+// scrollback 恒为一屏）。lines 正=向下、负=向上。
+// normal pane 进 copy-mode 滚历史（-e 滚到底自动退出回实时，且命令幂等、重复进入不重置位置）。
+// alt screen 程序（vim/less/claude TUI）不注入任何按键——方向键会被程序当自己的输入
+// （claude 是翻输入框历史），改为返回 true 让调用方通知前端滚 xterm 本地 scrollback
+// （claude 等 TUI 的旧画面会随 tmux 滚行 diff 积累在本地 scrollback，可回看）。
+// 返回值 = 是否 alt screen。pane 退出等竞态下命令失败可接受。
+export async function scrollAsync(opts: TmuxOpts, name: string, lines: number): Promise<boolean> {
+  const n = Math.min(Math.abs(lines), 100); // 单次滚动行数上限，防御异常值
+  if (n === 0) return false;
+  try {
+    if (await isAltScreen(opts, name)) return true;
+    if (lines < 0) {
+      await runAsync(BIN, [...baseArgs(opts), 'copy-mode', '-e', '-t', name], {
+        encoding: 'utf-8', timeout: 2000,
+      });
+    }
+    // 非 copy-mode 时 scroll-down 报 "not in a mode"，即已在实时底部，静默忽略
+    await runAsync(
+      BIN,
+      [...baseArgs(opts), 'send-keys', '-t', name, '-X', '-N', String(n), lines < 0 ? 'scroll-up' : 'scroll-down'],
+      { encoding: 'utf-8', timeout: 2000 },
+    );
+    return false;
+  } catch {
+    // 尽力而为：会话销毁/模式竞态下失败不影响正确性
+    return false;
+  }
+}

@@ -78,7 +78,7 @@ export async function handleConnection(ws: WSLike, mgr: IPtyManager, cmdCtx: Cmd
         const items = mgr.list();
         send({ type: 'sessions', items });
         for (const info of items) {
-          const replay = mgr.getRingBuffer(info.sessionId);
+          const replay = mgr.getRawTail(info.sessionId);
           if (replay) send({ type: 'data', sessionId: info.sessionId, payload: replay });
           const cwd = mgr.getCwd(info.sessionId);
           if (cwd) send({ type: 'cwd', sessionId: info.sessionId, cwd });
