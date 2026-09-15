@@ -4,6 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createServer } from './server.js';
+import * as tmux from './tmux.js';
+
+// 必须 socketName 隔离：不传时 PtyManager 默认连生产 wmt socket，
+// restore 会对生产会话重建 pipe-pane（RAW_DIR 指向测试目录），切断生产 raw 流
+const SOCK = 'wmt-test-' + Math.random().toString(36).slice(2, 8);
 
 let tmp: string;
 let server: http.Server;
@@ -15,10 +20,13 @@ beforeAll(async () => {
   fs.mkdirSync(path.join(tmp, 'wmt-b2', '2026-06-22'), { recursive: true });
   fs.writeFileSync(path.join(tmp, 'wmt-b2', '2026-06-22', '100000-aaaa.json'),
     JSON.stringify({ id: '100000-aaaa', windowId: 'wmt-b2', ts: '2026-06-22T02:00:00Z', model: 'glm-5.2', request: { model: 'glm-5.2' }, response: { usage: { input_tokens: 10, output_tokens: 5 } }, meta: { status: 200 } }));
-  ({ server, port } = await createServer({ port: 0 }));
+  ({ server, port } = await createServer({ port: 0, socketName: SOCK }));
 });
 afterAll(async () => {
-  await new Promise<void>((r) => server.close(() => r()));
+  await new Promise<void>((r) => server.close(() => {
+    tmux.killServerSync({ socketName: SOCK });
+    r();
+  }));
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
