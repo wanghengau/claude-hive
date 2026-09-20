@@ -9,6 +9,8 @@ interface Props {
   onClose: (id: string) => void;
   onShowRecord?: (id: string) => void;
   onReorder: (from: number, to: number) => void;
+  // 列表底部被其他元素（iPhone 镜像卡片）占用的高度，react-window 需要显式减去
+  bottomOffset?: number;
 }
 
 const ROW_HEIGHT = 172;
@@ -129,13 +131,13 @@ const Row = memo(function Row({ index, style, data }: { index: number; style: CS
   );
 });
 
-export function SessionList({ sessions, activeId, onSelect, onClose, onShowRecord, onReorder }: Props) {
+export function SessionList({ sessions, activeId, onSelect, onClose, onShowRecord, onReorder, bottomOffset = 0 }: Props) {
   // 拖拽中的源行索引；为 null 表示未在拖拽
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const data: RowData = { sessions, activeId, dragIndex, onSelect, onClose, onShowRecord, onReorder, setDragIndex };
   return (
     <List
-      height={window.innerHeight - 80}
+      height={window.innerHeight - 80 - bottomOffset}
       itemCount={sessions.length}
       itemSize={ROW_HEIGHT}
       width="100%"

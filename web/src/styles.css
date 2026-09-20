@@ -651,3 +651,139 @@ details[open] > summary { border-bottom: 1px solid var(--border); }
   font-size: 12px; font-family: var(--mono); transition: all 0.15s var(--ease);
 }
 .main-head .mh-transcript:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ============ IPHONE MIRROR ============ */
+/* idle 态：侧栏底部连接按钮条（高度由组件 inline style 控制，MIRROR_BAR_H 单一来源） */
+.mirror-card {
+  flex-shrink: 0;
+  /* 下边距 26px 对齐列表原有底部余量（公式 80 - sidebar-head 54），卡片只额外占用自身高度 */
+  margin: 0 8px 26px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.mirror-connect {
+  width: 100%;
+  height: 100%;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.18s var(--ease);
+}
+.mirror-connect:hover { color: var(--text); background: var(--accent-soft); }
+
+/* streaming 态：独立悬浮窗（几何由组件 inline style 控制），不占侧栏空间 */
+.mirror-float {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.mirror-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  cursor: move;
+  user-select: none;
+  /* pointer 拖动手势期间禁止触摸滚动手势干扰 */
+  touch-action: none;
+}
+.mirror-live {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--red);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.mirror-live .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: pulse 1.6s ease-in-out infinite; }
+.mirror-title { flex: 1; font-size: 12px; color: var(--text-dim); }
+.mirror-stop {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.mirror-stop:hover { color: var(--red); }
+.mirror-opacity {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mirror-opacity:hover { color: var(--text); }
+/* ◐ 按钮下方展开的透明度滑杆面板（挂在标题栏内，absolute 定位） */
+.mirror-opacity-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  box-shadow: var(--shadow-md);
+  z-index: 10;
+  cursor: default;
+  touch-action: none;
+}
+.mirror-opacity-panel input[type='range'] {
+  width: 140px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  display: block;
+}
+.mirror-video {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  /* 画布尺寸由组件 inline style 给定（连接时 fit 一次后冻结），object-fit fill 铺满画布 */
+  object-fit: fill;
+}
+/* 视口层：随窗口 resize 变化的取景框，画布在其中平移/缩放、溢出裁切 */
+.mirror-video-box {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+  /* 画面层滚轮缩放 + 拖动平移（含黑边区域） */
+  cursor: zoom-in;
+  touch-action: none;
+}
+/* 右下角缩放手柄 */
+.mirror-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, var(--border-strong) 50%);
+  border-bottom-right-radius: var(--radius);
+}
