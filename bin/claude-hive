@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+# claude-hive: 在任意目录后台常驻管理 claude-hive 全部服务 (server:4000 + web)。
+# 后台机制：nohup 让进程树忽略 SIGHUP (SIG_IGN 经 fork 继承给 server/web)，
+#           关闭终端不退出；子 shell + set -m 使 npm 自成进程组，stop 时
+#           kill -- -PID 一次性清掉整棵树，再用端口兜底防残留。
+# 安装：symlink 本文件到 ~/.local/bin/claude-hive (该目录已在 PATH)。
+set -u
+
+# --- 项目根目录自定位 (兼容 symlink 与 macOS bash 3.2，readlink 无 -f) ---
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+PROJECT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+
+RUN_DIR="$PROJECT_DIR/.run"
+PID_FILE="$RUN_DIR/claude-hive.pid"
+LOG_FILE="$RUN_DIR/claude-hive.log"
+SERVER_PORT="${PORT:-4000}"
+WEB_PORT="${WEB_PORT:-4001}"
+
+usage() {
+  cat <<EOF
+claude-hive — 后台管理 claude-hive 服务
+
+用法:
+  claude-hive             启动所有服务 (后台)
+  claude-hive start       同上
+  claude-hive stop        停止所有服务
+  claude-hive restart     重启
+  claude-hive status      查看运行状态
+  claude-hive logs [-f]   查看日志 (-f/--follow 实时跟随)
+  claude-hive help        显示本帮助
+
+端口: server :${SERVER_PORT}   web :${WEB_PORT}
+日志: ${LOG_FILE}
+项目: ${PROJECT_DIR}
+EOF
+}
+
+is_running() {
+  [[ -f "$PID_FILE" ]] || return 1
+  local pid; pid="$(cat "$PID_FILE" 2>/dev/null)"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+port_listen() { lsof -ti tcp:"$1" >/dev/null 2>&1; }
+
+start() {
+  if is_running; then
+    echo "已在运行 (PID $(cat "$PID_FILE"))，用 'claude-hive restart' 重启。"
+    return 0
+  fi
+  mkdir -p "$RUN_DIR"
+  : > "$LOG_FILE"
+  echo "启动中 (后台)..."
+  (
+    set -m                                 # 后台作业自成进程组 (PGID=PID)
+    cd "$PROJECT_DIR" || exit 1
+    nohup npm run dev < /dev/null > "$LOG_FILE" 2>&1 &
+    echo "$!" > "$PID_FILE"
+  )
+  sleep 1.5
+  if is_running; then
+    echo "已启动 (PID $(cat "$PID_FILE"))"
+    echo "  server:  http://localhost:${SERVER_PORT}"
+    echo "  web:     http://localhost:${WEB_PORT}  (端口见 web/vite.config.ts)"
+    echo "  日志:    claude-hive logs -f"
+    # 启动死亡看门狗：服务进程消失时抓取死亡现场(进程/系统快照)到 death.log
+    local svc_pid; svc_pid="$(cat "$PID_FILE")"
+    nohup "$0" watchdog "$svc_pid" > /dev/null 2>&1 &
+    echo $! > "$RUN_DIR/watchdog.pid"
+  else
+    echo "启动失败，日志末尾："
+    tail -n 30 "$LOG_FILE" 2>/dev/null
+    rm -f "$PID_FILE"
+    return 1
+  fi
+}
+
+# 兜底清理本项目残留服务进程：端口占用 + 按进程名匹配的 tsx watch / vite。
+# 处理杀进程组后仍漏网的"半死"进程——尤其是不占端口、空转的 tsx watcher：若不清，
+# 下次 src 变化它会重启 server 子进程，与新 server 抢 4000 端口 → EADDRINUSE 崩溃。
+# 用 $PROJECT_DIR 限定匹配范围，避免误杀其他项目的同名进程。
+cleanup_strays() {
+  local p r
+  for p in "$SERVER_PORT" "$WEB_PORT"; do                           # 端口兜底
+    r="$(lsof -ti tcp:"$p" 2>/dev/null)"
+    [[ -n "$r" ]] && kill "$r" 2>/dev/null
+  done
+  pkill -f "${PROJECT_DIR}.*tsx watch" 2>/dev/null                   # 进程名兜底：空转 tsx watcher
+  pkill -f "${PROJECT_DIR}.*vite" 2>/dev/null                        # 进程名兜底：web dev server (vite + esbuild)
+}
+
+# 死亡看门狗：监控服务 PID，进程消失时把"死亡现场"(全量进程/系统事件/服务日志)
+# 快照写入 death.log，用于排查不明 SIGTERM 来源。由 start() 用 nohup 独立启动，不属于
+# 服务进程组，故服务被杀时看门狗存活、能完成抓取后自退。stop() 会先停看门狗，只有
+# 外部意外 kill(不经 stop) 才会触发 dump。
+#
+# 两层监控:
+#  1) 半死自愈:顶层 PID 活着但 web/server 端口消失 —— 子进程被单独杀掉时
+#     concurrently 不会重启、旧版看门狗也发现不了。
+#     已确认的死亡原因:外部 AI 会话重启别的项目 dev server 时执行 `pkill -f vite`
+#     无差别误杀(2026-07-30 16:25 死亡快照抓到凶手现场,7/30-7/31 反复发生;
+#     另:vite 被 TERM 后优雅退出 code 0,concurrently --restart-tries 对其无效)。
+#     → 每场死亡:首次全量抓现场到 death.log(供排查凶手) + 单独拉起对应子服务。
+#     防抖:连续 3 次(约 6s)未监听才认定死亡,避免 tsx watch 正常重启 4000 时误判。
+#     计数:连续拉起失败(端口未恢复)满 5 次才放弃;一旦恢复监听计数归零 ——
+#     外部偶发误杀场景可无限次自愈,vite 本身坏掉才放弃(放弃后端口恢复自动复位)。
+#     节流:同一场死亡只全量 dump 一次(旧版放弃后每 9s dump 一次,death.log 涨到 33MB)。
+#  2) 全死取证:顶层 PID 消失 → 全量快照后自退(原逻辑)。
+# 注意:拉起的子进程脱离 concurrently 管理,stop() 的 cleanup_strays(端口+pkill 兜底)能清掉。
+watchdog() {
+  local svc_pid="${1:-}"
+  [[ -z "$svc_pid" ]] && { echo "watchdog: 缺少服务 PID" >&2; exit 1; }
+  local death_log="$RUN_DIR/death.log"
+  local web_miss=0 server_miss=0 web_fails=0 server_fails=0
+  local web_down_since="" server_down_since=""
+
+  # 启动宽限:等服务首次监听(冷启动 npm/vite 需数秒),避免误判拉起第二份
+  local grace=0
+  while ! port_listen "$WEB_PORT" && (( grace < 30 )); do sleep 2; grace=$((grace+1)); done
+
+  while kill -0 "$svc_pid" 2>/dev/null; do
+    # --- web 侧 ---
+    if port_listen "$WEB_PORT"; then
+      if [[ -n "$web_down_since" ]]; then
+        echo "[watchdog] web (:${WEB_PORT}) 已恢复 (死亡始于 ${web_down_since})" >> "$LOG_FILE"
+        echo "[$(date '+%F %T')] web (:${WEB_PORT}) 已恢复监听 (死亡始于 ${web_down_since})" >> "$death_log"
+        web_down_since=""
+      fi
+      web_miss=0
+      web_fails=0
+    else
+      web_miss=$((web_miss+1))
+      if (( web_miss >= 3 )); then
+        web_miss=0
+        if [[ -z "$web_down_since" ]]; then
+          web_down_since="$(date '+%F %T')"
+          {
+            echo "========================================================"
+            echo "[${web_down_since}] web (:${WEB_PORT}) 消失但顶层 PID=$svc_pid 存活 —— 半死现场快照"
+            echo "--- 全量进程 (排查 kill 发送者) ---"
+            ps -axo pid,ppid,user,%cpu,%mem,etime,command 2>/dev/null
+            echo "--- 最近电源事件 ---"
+            pmset -g log 2>/dev/null | tail -8
+            echo "--- 服务日志尾部 30 行 ---"
+            tail -30 "$LOG_FILE" 2>/dev/null
+          } >> "$death_log" 2>&1
+        fi
+        if (( web_fails < 5 )); then
+          web_fails=$((web_fails+1))
+          (cd "$PROJECT_DIR" && nohup npm -w web run dev < /dev/null >> "$LOG_FILE" 2>&1 &)
+          echo "[watchdog] web (:${WEB_PORT}) 已重新拉起 (连错 ${web_fails}/5,恢复则归零)" >> "$LOG_FILE"
+          sleep 6
+        elif (( web_fails == 5 )); then
+          web_fails=6
+          echo "[$(date '+%F %T')] web 连续 5 次拉起未恢复,放弃自愈;端口恢复后自动复位" >> "$death_log"
+          echo "[watchdog] web 连续 5 次拉起未恢复,放弃自愈" >> "$LOG_FILE"
+        fi
+      fi
+    fi
+    # --- server 侧(对称逻辑;防抖窗口覆盖 tsx watch 正常重启的短暂断口) ---
+    if port_listen "$SERVER_PORT"; then
+      if [[ -n "$server_down_since" ]]; then
+        echo "[watchdog] server (:${SERVER_PORT}) 已恢复 (死亡始于 ${server_down_since})" >> "$LOG_FILE"
+        echo "[$(date '+%F %T')] server (:${SERVER_PORT}) 已恢复监听 (死亡始于 ${server_down_since})" >> "$death_log"
+        server_down_since=""
+      fi
+      server_miss=0
+      server_fails=0
+    else
+      server_miss=$((server_miss+1))
+      if (( server_miss >= 3 )); then
+        server_miss=0
+        if [[ -z "$server_down_since" ]]; then
+          server_down_since="$(date '+%F %T')"
+          {
+            echo "========================================================"
+            echo "[${server_down_since}] server (:${SERVER_PORT}) 消失但顶层 PID=$svc_pid 存活 —— 半死现场快照"
+            echo "--- 全量进程 (排查 kill 发送者) ---"
+            ps -axo pid,ppid,user,%cpu,%mem,etime,command 2>/dev/null
+            echo "--- 最近电源事件 ---"
+            pmset -g log 2>/dev/null | tail -8
+            echo "--- 服务日志尾部 30 行 ---"
+            tail -30 "$LOG_FILE" 2>/dev/null
+          } >> "$death_log" 2>&1
+        fi
+        if (( server_fails < 5 )); then
+          server_fails=$((server_fails+1))
+          (cd "$PROJECT_DIR" && nohup npm -w server run dev < /dev/null >> "$LOG_FILE" 2>&1 &)
+          echo "[watchdog] server (:${SERVER_PORT}) 已重新拉起 (连错 ${server_fails}/5,恢复则归零)" >> "$LOG_FILE"
+          sleep 8
+        elif (( server_fails == 5 )); then
+          server_fails=6
+          echo "[$(date '+%F %T')] server 连续 5 次拉起未恢复,放弃自愈;端口恢复后自动复位" >> "$death_log"
+          echo "[watchdog] server 连续 5 次拉起未恢复,放弃自愈" >> "$LOG_FILE"
+        fi
+      fi
+    fi
+    sleep 2
+  done
+  {
+    echo "========================================================"
+    echo "[$(date '+%F %T')] 服务 PID=$svc_pid 已消失 —— 死亡现场快照"
+    echo "--- 全量进程 (排查 kill 发送者) ---"
+    ps -axo pid,ppid,user,%cpu,%mem,etime,command 2>/dev/null
+    echo "--- 最近重启/关机 ---"
+    last -5 reboot shutdown 2>/dev/null
+    echo "--- 最近电源事件 ---"
+    pmset -g log 2>/dev/null | tail -8
+    echo "--- 服务日志尾部 30 行 ---"
+    tail -30 "$LOG_FILE" 2>/dev/null
+  } >> "$death_log" 2>&1
+  rm -f "$RUN_DIR/watchdog.pid"
+}
+
+stop() {
+  # 先停看门狗，避免正常停止被误记为"死亡现场"；只有外部意外 kill 才触发 dump
+  if [[ -f "$RUN_DIR/watchdog.pid" ]]; then
+    kill "$(cat "$RUN_DIR/watchdog.pid")" 2>/dev/null
+    rm -f "$RUN_DIR/watchdog.pid"
+  fi
+  local pid=""
+  [[ -f "$PID_FILE" ]] && pid="$(cat "$PID_FILE" 2>/dev/null)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    echo "停止 (PID $pid)..."
+    kill -TERM "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null   # 杀整个进程组
+    for _ in 1 2 3 4 5 6; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null
+      sleep 0.5
+    fi
+  else
+    echo "进程已不在 (清理 pidfile + 残留)。"
+  fi
+  cleanup_strays                                                    # 兜底：端口占用 + 半死 watcher
+  rm -f "$PID_FILE"
+  echo "已停止。"
+}
+
+status() {
+  if is_running; then
+    echo "运行中 (PID $(cat "$PID_FILE"))"
+    if port_listen "$SERVER_PORT"; then echo "  server (:${SERVER_PORT}) 监听中"
+    else echo "  server (:${SERVER_PORT}) 未监听 (可能仍在启动)"; fi
+    if port_listen "$WEB_PORT";    then echo "  web (:${WEB_PORT}) 监听中"
+    else echo "  web (:${WEB_PORT}) 未监听"; fi
+  else
+    echo "未运行。"
+    return 1
+  fi
+}
+
+logs() {
+  [[ -f "$LOG_FILE" ]] || { echo "无日志 ($LOG_FILE)，服务可能从未启动。"; return 1; }
+  if [[ "${1:-}" == "-f" || "${1:-}" == "--follow" ]]; then
+    tail -f "$LOG_FILE"
+  else
+    tail -n 50 "$LOG_FILE"
+  fi
+}
+
+case "${1:-start}" in
+  start)         start ;;
+  stop)          stop ;;
+  restart)       stop; start ;;
+  watchdog)      watchdog "${2:-}" ;;
+  status)        status ;;
+  logs)          logs "${2:-}" ;;
+  help|-h|--help) usage ;;
+  *) echo "未知命令: $1" >&2; echo >&2; usage >&2; exit 1 ;;
+esac
