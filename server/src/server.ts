@@ -13,6 +13,7 @@ import { readQuickCommands, writeQuickCommands } from './quick-commands.js';
 import { remove, prune } from './command-history.js';
 import { analyzeRecords, buildInterpretPrompt } from './analyzer.js';
 import { interpretProfile, NoAnalyzerKeyError } from './llm-client.js';
+import { listTranscripts, readTranscript } from './transcript.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(__dirname, '../../web/dist');
@@ -88,6 +89,30 @@ export async function createServer(opts: {
       }
       return json(405, { error: 'method not allowed' });
     }
+    // ── claude 对话历史（transcript）：历史回看的权威数据源 ──
+    // （终端流层面无固化语义——TUI 全屏重绘，旧内容被覆盖，还原不出干净历史）
+    if (method === 'GET' && url.startsWith('/api/transcript/')) {
+      const u = new URL(url, 'http://localhost');
+      const json = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
+      const cwd = u.searchParams.get('cwd') ?? '~';
+      if (u.pathname === '/api/transcript/list') return json(200, listTranscripts(cwd));
+      if (u.pathname === '/api/transcript/item') {
+        const id = u.searchParams.get('id') ?? '';
+        const t = readTranscript(cwd, id);
+        if (!t) return json(404, { error: 'not found' });
+        return json(200, t);
+      }
+      return json(404, { error: 'not found' });
+    }
+    // ── 历史（原始流尾部）：调试/诊断用 ──
+    if (method === 'GET') {
+      const hm = url.match(/^\/api\/history\/([A-Za-z0-9_-]+)$/);
+      if (hm) {
+        const json = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
+        if (!mgr.list().some((s) => s.sessionId === hm[1])) return json(404, { error: 'session not found' });
+        return json(200, { raw: mgr.getRawTail(hm[1]) });
+      }
+    }
     // ── analyze 路由必须在 handleProxy 之前，否则 POST 会被代理吞掉 ──
     if (method === 'GET' && url.startsWith('/api/analyze/harness')) {
       const u = new URL(url, 'http://localhost');
@@ -154,9 +179,10 @@ export async function createServer(opts: {
     remove(COMMANDS_DIR, sessionId);
   });
 
-  // 启动清孤儿:restore 完成后,删 data/commands/ 里对应 tmux session 已不存在的文件
+  // 启动清孤儿:restore 完成后,删 data/commands/ 与 .run/raw/ 里对应 tmux session 已不存在的文件
   mgr.restored.then(() => {
     prune(COMMANDS_DIR, new Set(mgr.list().map((s) => s.sessionId)));
+    mgr.pruneOrphanRawLogs();
   }).catch(() => { /* restore 失败不阻塞 */ });
 
   const wss = new WebSocketServer({ server, path: '/ws' });
