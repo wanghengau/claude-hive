@@ -18,7 +18,7 @@ import { swipeUpOnMirror, MIRROR_PROCESS } from './mirror-control.js';
 describe('swipeUpOnMirror', () => {
   beforeEach(() => { calls.length = 0; results.length = 0; });
 
-  it('成功:定位+提前 → 注入 → 恢复焦点,坐标按窗口几何换算', async () => {
+  it('成功:定位+提前 → scroll 注入 → 恢复焦点,坐标按窗口几何换算', async () => {
     results.push({ stdout: 'Safari|1136,640,671,348\n' }, { stdout: 'OK' }, { stdout: '' });
     const r = await swipeUpOnMirror();
     expect(r).toEqual({ ok: true });
@@ -26,11 +26,11 @@ describe('swipeUpOnMirror', () => {
     // ① AppleScript:定位+提前,脚本含进程名
     expect(calls[0].cmd).toBe('osascript');
     expect(calls[0].args[1]).toContain(MIRROR_PROCESS);
-    // ② JXA 注入:x=1136+671/2=1471.5, y0=640+348*5/6=930, y1=640+348/3=756
+    // ② JXA scroll 注入:光标瞬移窗口中心(1136+671/2, 640+348/2)
     expect(calls[1].args).toEqual(
-      ['-l', 'JavaScript', '-e', expect.stringContaining('CGEventPost'), '1471.5', '930', '756'],
+      ['-l', 'JavaScript', '-e', expect.stringContaining('CGEventCreateScrollWheelEvent'), '1471.5', '814'],
     );
-    // ③ 恢复原焦点进程
+    // ③ 恢复原焦点进程(激活时镜像窗口被自然压回下层)
     expect(calls[2].args[1]).toContain('Safari');
   });
 

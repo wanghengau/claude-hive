@@ -41,24 +41,28 @@ const ASC_PREP = [
   'end tell',
 ].join('\n');
 
-// ② JXA:全局 CGEventPost(0 = kCGHIDEventTap)合成 leftDown → 16 步 leftMouseDragged → leftUp,
-//   「下部 1/6 → 上部 1/3」。事件常量内联数值(enum 宏不保证被 ObjC bridge 暴露):
-//   1/4/6 = leftMouseDown/leftMouseDragged/leftMouseUp,0 = kCGMouseButtonLeft。
-//   节奏必需:瞬发序列 Continuity 不认;PostToPid 无效(spike 实测)
+// ② JXA:合成滚动事件(触摸板双指上划的等价物——用户实测真实双指滚动可触发 iPhone 上划,
+//   而合成拖拽被 Continuity 判成点击)。序列:光标瞬移窗口中心(scroll 派发给光标下窗口)→
+//   8×(-60px)滚动 → 光标移回原位。实测约束:窗口必须 frontmost(PostToPid/session tap/
+//   可见非前台均无效);瞬移一次无爬行,全程 ~150ms。
+//   坐标系:NSEvent.mouseLocation 为 NS 系(原点左下),CG 系(原点左上)翻转以主屏为准
 const JXA_SWIPE = `
 ObjC.import('CoreGraphics');
+ObjC.import('AppKit');
 ObjC.import('unistd');
 function run(argv) {
-  var x = parseFloat(argv[0]), y0 = parseFloat(argv[1]), y1 = parseFloat(argv[2]);
-  function post(type, y) {
-    var ev = $.CGEventCreateMouseEvent(null, type, $.CGPointMake(x, y), 0);
-    $.CGEventPost(0, ev);
+  var x = parseFloat(argv[0]), y = parseFloat(argv[1]);
+  var mb = $.CGDisplayBounds($.CGMainDisplayID());
+  var orig = $.NSEvent.mouseLocation;
+  var ox = orig.x, oy = (mb.origin.y + mb.size.height) - orig.y;
+  $.CGEventPost(0, $.CGEventCreateMouseEvent(null, 5, $.CGPointMake(x, y), 0));
+  $.usleep(30000);
+  for (var i = 0; i < 8; i++) {
+    $.CGEventPost(0, $.CGEventCreateScrollWheelEvent(null, 1, 1, -60));
+    $.usleep(12000);
   }
-  post(1, y0);
-  $.usleep(40000);
-  for (var i = 1; i <= 16; i++) { post(4, y0 + (y1 - y0) * i / 16); $.usleep(20000); }
-  $.usleep(40000);
-  post(6, y1);
+  $.usleep(20000);
+  $.CGEventPost(0, $.CGEventCreateMouseEvent(null, 5, $.CGPointMake(ox, oy), 0));
   return 'OK';
 }`;
 
@@ -76,7 +80,7 @@ export async function swipeUpOnMirror(): Promise<SwipeResult> {
     prevFront = m[1];
     const bx = +m[2], by = +m[3], bw = +m[4], bh = +m[5];
     await execFileP('osascript', ['-l', 'JavaScript', '-e', JXA_SWIPE,
-      String(bx + bw / 2), String(by + bh * 5 / 6), String(by + bh / 3)]);
+      String(bx + bw / 2), String(by + bh / 2)]);
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
