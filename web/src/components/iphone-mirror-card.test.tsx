@@ -95,7 +95,7 @@ async function stubStage(viewW: number, viewH: number, streamW = 318, streamH = 
 }
 
 describe('MirrorBar / MirrorRow / useMirrorStream', () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it('idle 态渲染侧栏连接条，无镜像卡', () => {
     renderHarness();
@@ -323,5 +323,81 @@ describe('MirrorBar / MirrorRow / useMirrorStream', () => {
     await screen.findByRole('slider');
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     await waitFor(() => expect(screen.queryByRole('slider')).toBeNull());
+  });
+
+  // ⌃+双指上划透传:jsdom 同步连发 wheel(mock fetch 同步计数,不走 waitFor)
+  function ctrlSwipe(el: Element, deltaY = 60) {
+    fireEvent.wheel(el, { deltaY, ctrlKey: true, clientX: 100, clientY: 100 });
+  }
+
+  it('⌃+上划累计过阈值 → fetch 透传一次;冷却窗内 momentum 连发不重复触发', async () => {
+    const fake = makeFakeStream();
+    stubGetDisplayMedia(() => Promise.resolve(fake.stream));
+    const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ ok: true }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    renderHarness();
+    await connect(fake);
+    await stubStage(400, 800);
+    const v = videoEl();
+    vi.useFakeTimers();
+    try {
+      for (let i = 0; i < 3; i++) ctrlSwipe(boxEl());          // 累计 180 ≥ 120 → 触发 1 次
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe('/api/mirror/swipe-up');
+      expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+      const s0 = viewOf(v).s;
+      for (let i = 0; i < 30; i++) ctrlSwipe(boxEl());         // 冷却内连发
+      expect(fetchMock).toHaveBeenCalledTimes(1);               // 仍 1 次
+      expect(viewOf(v).s).toBe(s0);                            // 且未触发缩放
+      vi.advanceTimersByTime(900);                              // 冷却结束
+      for (let i = 0; i < 3; i++) ctrlSwipe(boxEl());
+      expect(fetchMock).toHaveBeenCalledTimes(2);               // 可再次触发
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('⌃+下划(deltaY<0) → 不透传,保持原缩放行为', async () => {
+    const fake = makeFakeStream();
+    stubGetDisplayMedia(() => Promise.resolve(fake.stream));
+    const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ ok: true }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    renderHarness();
+    const v = await connect(fake);
+    await stubStage(400, 800);
+    for (let i = 0; i < 5; i++) fireEvent.wheel(boxEl(), { deltaY: -100, ctrlKey: true, clientX: 200, clientY: 400 });
+    await waitFor(() => expect(viewOf(v).s).toBeGreaterThan(1)); // 原缩放照旧
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('低幅 wheel 间隔 >600ms → 累计重置,不误触(pinch 噪声防线)', async () => {
+    const fake = makeFakeStream();
+    stubGetDisplayMedia(() => Promise.resolve(fake.stream));
+    const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ ok: true }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    renderHarness();
+    await connect(fake);
+    await stubStage(400, 800);
+    vi.useFakeTimers();
+    try {
+      for (let i = 0; i < 2; i++) { ctrlSwipe(boxEl(), 50); vi.advanceTimersByTime(700); } // 各 50,间隔重置
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('透传失败(window-not-found / 网络拒绝)→ 标题条短暂提示,不静默', async () => {
+    const fake = makeFakeStream();
+    stubGetDisplayMedia(() => Promise.resolve(fake.stream));
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ ok: false, reason: 'window-not-found' }) })));
+    renderHarness();
+    await connect(fake);
+    await stubStage(400, 800);
+    vi.useFakeTimers();
+    try {
+      for (let i = 0; i <  3; i++) ctrlSwipe(boxEl());
+      await vi.advanceTimersByTimeAsync(0);  // flush fetch 两层 .then 微任务
+      expect(document.querySelector('.mirror-err')).not.toBeNull();
+      expect(document.querySelector('.mirror-err')!.textContent).toContain('iPhone 镜像窗口');
+      await vi.advanceTimersByTimeAsync(2100);  // 异步推进:setState 后等 React 渲染 flush
+      expect(document.querySelector('.mirror-err')).toBeNull();  // 2s 后淡出
+    } finally { vi.useRealTimers(); }
   });
 });

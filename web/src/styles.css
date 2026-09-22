@@ -718,6 +718,7 @@ details[open] > summary { border-bottom: 1px solid var(--border); }
 }
 .mirror-live .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: pulse 1.6s ease-in-out infinite; }
 .mirror-title { flex: 1; font-size: 12px; color: var(--text-dim); }
+.mirror-err { font-size: 11px; color: var(--red); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mirror-stop {
   background: none;
   border: none;

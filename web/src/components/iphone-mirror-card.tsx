@@ -11,6 +11,12 @@ const MAX_S = Infinity;
 // 流分辨率未知时的兜底比例（iPhone 竖屏）
 const FALLBACK_STREAM_W = 318;
 const FALLBACK_STREAM_H = 701;
+// ⌃+双指上划透传：累计阈值/冷却/累计重置间隔(ms)。自然滚动下双指上划 deltaY>0；
+// 若系统关闭自然滚动方向不符，翻转此符号即可
+const SWIPE_UP_DELTA_SIGN = 1;
+const SWIPE_TRIGGER_DELTA = 120;
+const SWIPE_COOLDOWN_MS = 800;
+const SWIPE_RESET_GAP_MS = 600;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
@@ -59,6 +65,26 @@ export function MirrorRow({ stream, onStop, headDraggable, onHeadDragStart, onHe
   // 画面透明度：1-100 整数档（◐ 按钮展开滑杆面板连续调节）
   const [opacity, setOpacity] = useState(100);
   const [showOpacityPanel, setShowOpacityPanel] = useState(false);
+  // 透传聚合（非渲染态）与失败提示：ctrl 按住累计 deltaY，过阈值 POST 一次并冷却；
+  // 事件间隔超 SWIPE_RESET_GAP_MS 视为新 gesture 重置累计（防 pinch 噪声慢性累计）
+  const swipeRef = useRef({ acc: 0, last: 0, cooldownUntil: 0 });
+  const [errFlash, setErrFlash] = useState('');
+  const errTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashError = useCallback((msg: string) => {
+    setErrFlash(msg);
+    if (errTimerRef.current) clearTimeout(errTimerRef.current);
+    errTimerRef.current = setTimeout(() => setErrFlash(''), 2000);
+  }, []);
+  useEffect(() => () => { if (errTimerRef.current) clearTimeout(errTimerRef.current); }, []);
+  const triggerSwipeUp = useCallback(() => {
+    fetch('/api/mirror/swipe-up', { method: 'POST' })
+      .then((r) => r.json() as Promise<{ ok: boolean; reason?: string }>)
+      .then((d) => {
+        if (d.ok) return;
+        flashError(d.reason === 'window-not-found' ? '未找到 iPhone 镜像窗口' : '注入失败:检查辅助功能授权');
+      })
+      .catch(() => flashError('透传服务不可达'));
+  }, [flashError]);
 
   // 画布 contain fit：按流分辨率对当前视口算等比尺寸（挂载/metadata/旋转 resize 时调用）
   const fitCanvas = useCallback(() => {
@@ -115,6 +141,23 @@ export function MirrorRow({ stream, onStop, headDraggable, onHeadDragStart, onHe
     const el = boxRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      // ⌃+双指上划 → 透传 iPhone 上划：不缩放、不冒泡；momentum 聚合防连发
+      if (e.ctrlKey && SWIPE_UP_DELTA_SIGN * e.deltaY > 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        const now = Date.now();
+        const s = swipeRef.current;
+        if (now < s.cooldownUntil) return;
+        if (now - s.last > SWIPE_RESET_GAP_MS) s.acc = 0;
+        s.last = now;
+        s.acc += e.deltaY;
+        if (s.acc >= SWIPE_TRIGGER_DELTA) {
+          s.acc = 0;
+          s.cooldownUntil = now + SWIPE_COOLDOWN_MS;
+          triggerSwipeUp();
+        }
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       // 步进 1.05：更平滑的逐级缩放
@@ -172,6 +215,7 @@ export function MirrorRow({ stream, onStop, headDraggable, onHeadDragStart, onHe
       >
         <span className="mirror-live"><span className="dot" />LIVE</span>
         <span className="mirror-title">📱 iPhone 镜像</span>
+        {errFlash && <span className="mirror-err">{errFlash}</span>}
         <button
           className="mirror-opacity"
           onClick={() => setShowOpacityPanel((s) => !s)}
