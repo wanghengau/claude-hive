@@ -158,8 +158,9 @@ body {
   box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-md), var(--accent-glow);
 }
 .row.exited .row-inputs { opacity: 0.5; }
-.row.dragging { opacity: 0.4; }
-.row.drop-target { border-color: var(--accent); border-style: dashed; }
+/* 拖拽反馈通用类（会话行与镜像行共用） */
+.dragging { opacity: 0.4; }
+.drop-target { border-color: var(--accent); border-style: dashed; }
 
 .row-head {
   display: flex;
@@ -678,27 +679,31 @@ details[open] > summary { border-bottom: 1px solid var(--border); }
 }
 .mirror-connect:hover { color: var(--text); background: var(--accent-soft); }
 
-/* streaming 态：独立悬浮窗（几何由组件 inline style 控制），不占侧栏空间 */
-.mirror-float {
-  position: fixed;
-  z-index: 1000;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
+/* streaming 态：会话列表中的镜像行卡片（高度 MIRROR_ROW_H，由 react-window 定行高）。
+   本体不带背景：画面透明时透出侧栏底色；标题栏背景由 .mirror-head 自持 */
+.mirror-row-card {
+  height: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow-md);
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
+.mirror-row-card:hover { border-color: var(--border-strong); }
 .mirror-head {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
   flex-shrink: 0;
-  cursor: move;
+  cursor: grab;
   user-select: none;
+  /* 透明度滑杆面板 absolute 挂载的定位基准；缺失时面板会相对最近的 positioned
+     祖先定位而被卡片 overflow:hidden 裁剪，点击 ◐ 看似无反应 */
+  position: relative;
   /* pointer 拖动手势期间禁止触摸滚动手势干扰 */
   touch-action: none;
 }
@@ -764,26 +769,14 @@ details[open] > summary { border-bottom: 1px solid var(--border); }
   /* 画布尺寸由组件 inline style 给定（连接时 fit 一次后冻结），object-fit fill 铺满画布 */
   object-fit: fill;
 }
-/* 视口层：随窗口 resize 变化的取景框，画布在其中平移/缩放、溢出裁切 */
+/* 视口层：随卡片空间变化的取景框，画布在其中平移/缩放、溢出裁切。
+   不带背景：画面透明度调低时直接透出卡片后内容 */
 .mirror-video-box {
   flex: 1;
   min-height: 0;
   position: relative;
   overflow: hidden;
-  background: #000;
   /* 画面层滚轮缩放 + 拖动平移（含黑边区域） */
   cursor: zoom-in;
   touch-action: none;
-}
-/* 右下角缩放手柄 */
-.mirror-resize {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 16px;
-  height: 16px;
-  cursor: nwse-resize;
-  touch-action: none;
-  background: linear-gradient(135deg, transparent 50%, var(--border-strong) 50%);
-  border-bottom-right-radius: var(--radius);
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { IPhoneMirrorCard } from './iphone-mirror-card.js';
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { MirrorBar, MirrorRow } from './iphone-mirror-card.js';
+import { useMirrorStream } from '../use-mirror-stream.js';
 
 // jsdom 没有 mediaDevices，伪造最小 MediaStream：一条 video track + ended 事件回调表
 function makeFakeStream() {
@@ -25,11 +26,28 @@ function stubGetDisplayMedia(impl: () => Promise<unknown>) {
   return gdm;
 }
 
-function renderCard() {
-  return render(<IPhoneMirrorCard />);
+// 与 App 层同构的最小接线：流 hook 在列表外持有，Bar/Row 按 stream 有无条件渲染。
+// 渲染期把 hook 返回值写给外部变量，测试直接读（渲染返回后即有效）
+let mirrorApi: ReturnType<typeof useMirrorStream>;
+function Harness() {
+  mirrorApi = useMirrorStream();
+  return (
+    <>
+      {mirrorApi.stream === null && <MirrorBar onStart={mirrorApi.start} />}
+      {mirrorApi.stream !== null && (
+        <div className="mirror-row-card">
+          <MirrorRow stream={mirrorApi.stream} onStop={mirrorApi.stop} />
+        </div>
+      )}
+    </>
+  );
 }
 
-async function connect(fake: ReturnType<typeof makeFakeStream>) {
+function renderHarness() {
+  return render(<Harness />);
+}
+
+async function connect(_fake: ReturnType<typeof makeFakeStream>) {
   screen.getByRole('button', { name: /iPhone 镜像/ }).click();
   await waitFor(() => expect(screen.getByText('LIVE')).toBeInTheDocument());
   // muted+autoplay 的 video 在 jsdom 无障碍树里没有稳定的隐式角色，直接按类名取
@@ -44,16 +62,11 @@ function firePointer(el: Element, type: string, c: { x: number; y: number }) {
   el.dispatchEvent(ev);
 }
 
-// 拖动/缩放共用的 pointer 手势：down → move → up
+// 拖动画面平移共用的 pointer 手势：down → move → up
 function gesture(el: Element, from: { x: number; y: number }, to: { x: number; y: number }) {
   firePointer(el, 'pointerdown', from);
   firePointer(el, 'pointermove', to);
   firePointer(el, 'pointerup', to);
-}
-
-function floatStyle() {
-  const el = document.querySelector('.mirror-float') as HTMLElement;
-  return el.style;
 }
 
 function videoEl() {
@@ -81,134 +94,103 @@ async function stubStage(viewW: number, viewH: number, streamW = 318, streamH = 
   await waitFor(() => expect(parseFloat(v.style.width)).toBeGreaterThan(0));
 }
 
-describe('IPhoneMirrorCard', () => {
+describe('MirrorBar / MirrorRow / useMirrorStream', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('idle 态渲染侧栏连接按钮，无悬浮窗', () => {
-    renderCard();
+  it('idle 态渲染侧栏连接条，无镜像卡', () => {
+    renderHarness();
     expect(screen.getByRole('button', { name: /iPhone 镜像/ })).toBeInTheDocument();
-    expect(document.querySelector('.mirror-float')).toBeNull();
+    expect(document.querySelector('.mirror-row-card')).toBeNull();
   });
 
-  it('点击连接成功 → 弹出悬浮窗，video 绑定共享流', async () => {
+  it('点击连接成功 → 镜像卡出现，video 绑定共享流', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
+    renderHarness();
     const video = await connect(fake);
     expect(video.srcObject).toBe(fake.stream);
-    expect(document.querySelector('.mirror-float')).not.toBeNull();
+    expect(document.querySelector('.mirror-row-card')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /iPhone 镜像 · 连接/ })).not.toBeInTheDocument();
   });
 
   it('用户在选择器点取消 → 静默回 idle，不报错', async () => {
     stubGetDisplayMedia(() => Promise.reject(new DOMException('Permission denied', 'NotAllowedError')));
-    renderCard();
+    renderHarness();
     screen.getByRole('button', { name: /iPhone 镜像/ }).click();
     await waitFor(() => expect(screen.getByRole('button', { name: /iPhone 镜像/ })).toBeInTheDocument());
     expect(screen.queryByText('LIVE')).not.toBeInTheDocument();
-    expect(document.querySelector('.mirror-float')).toBeNull();
+    expect(document.querySelector('.mirror-row-card')).toBeNull();
   });
 
   it('浏览器侧停止共享（track ended）→ 回收 track 并回 idle', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
+    renderHarness();
     await connect(fake);
     fake.fire('ended');
     await waitFor(() => expect(screen.queryByText('LIVE')).not.toBeInTheDocument());
     expect(fake.track.stop).toHaveBeenCalled();
-    expect(document.querySelector('.mirror-float')).toBeNull();
+    expect(document.querySelector('.mirror-row-card')).toBeNull();
+    expect(screen.getByRole('button', { name: /iPhone 镜像/ })).toBeInTheDocument();
   });
 
   it('点停止按钮 → 回收 track 并回 idle', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
+    renderHarness();
     await connect(fake);
     screen.getByRole('button', { name: '×' }).click();
     await waitFor(() => expect(screen.queryByText('LIVE')).not.toBeInTheDocument());
     expect(fake.track.stop).toHaveBeenCalled();
-    expect(document.querySelector('.mirror-float')).toBeNull();
+    expect(document.querySelector('.mirror-row-card')).toBeNull();
   });
 
-  it('卸载组件 → 停止所有 track', async () => {
+  it('MirrorRow 卸载（虚拟列表滚动移出）→ 只解绑画面，绝不 stop tracks（续播防线）', () => {
+    const fake = makeFakeStream();
+    const { unmount } = render(<MirrorRow stream={fake.stream as unknown as MediaStream} onStop={() => {}} />);
+    const v = videoEl();
+    expect(v.srcObject).toBe(fake.stream);
+    unmount();
+    expect(fake.track.stop).not.toHaveBeenCalled();
+  });
+
+  it('卸载整个 Harness（含流 hook）→ 停止所有 track', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    const { unmount } = renderCard();
+    const { unmount } = renderHarness();
     await connect(fake);
     unmount();
     expect(fake.track.stop).toHaveBeenCalled();
   });
 
-  it('拖动标题栏 → 悬浮窗位置随指针移动', async () => {
+  it('拖拽源仅限标题条：headDraggable 时仅 head 可拖、画面区永不可拖（防 pan 手势被 DnD 劫走）', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
+    renderHarness();
     await connect(fake);
-    const before = { left: floatStyle().left, top: floatStyle().top };
-    // 左上方向移动，量控制在默认 y=16 的余量内，避开边界 clamp 干扰
-    gesture(document.querySelector('.mirror-head')!, { x: 400, y: 300 }, { x: 350, y: 290 });
-    // pointermove 属 React 18 continuous 事件，setState 异步调度，需等 re-render 提交
-    await waitFor(() => expect(parseFloat(floatStyle().left)).toBeCloseTo(parseFloat(before.left) - 50));
-    expect(parseFloat(floatStyle().top)).toBeCloseTo(parseFloat(before.top) - 10);
-  });
-
-  it('拖动右下角手柄 → 悬浮窗等量缩放，防消失下限 60px', async () => {
-    const fake = makeFakeStream();
-    stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
-    await connect(fake);
-    const handle = document.querySelector('.mirror-resize')!;
-    const before = { w: parseFloat(floatStyle().width), h: parseFloat(floatStyle().height) };
-    // 缩小 (‑40, ‑60)
-    gesture(handle, { x: 300, y: 300 }, { x: 260, y: 240 });
-    await waitFor(() => expect(parseFloat(floatStyle().width)).toBeCloseTo(before.w - 40));
-    expect(parseFloat(floatStyle().height)).toBeCloseTo(before.h - 60);
-    // 拼命往小拖 → clamp 在防消失下限（两次都要等提交，第二次 down 的 base 才是最新几何）
-    gesture(handle, { x: 500, y: 500 }, { x: 0, y: 0 });
-    await waitFor(() => expect(parseFloat(floatStyle().width)).toBe(60));
-    expect(parseFloat(floatStyle().height)).toBe(60);
-  });
-
-  it('resize 窗口 → 画布尺寸与视图变换保持不变（内容不随窗口缩放）', async () => {
-    const fake = makeFakeStream();
-    stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
-    const v = await connect(fake);
-    await stubStage(400, 800);
-    const winW0 = parseFloat(floatStyle().width);
-    const frozen = { w: v.style.width, h: v.style.height, t: v.style.transform };
-    // 视口尺寸变化（模拟窗口 resize）
-    const box = boxEl();
-    Object.defineProperty(box, 'clientWidth', { value: 600, configurable: true });
-    Object.defineProperty(box, 'clientHeight', { value: 500, configurable: true });
-    // 拖动手柄改窗口几何（触发 re-render）
-    gesture(document.querySelector('.mirror-resize')!, { x: 300, y: 300 }, { x: 320, y: 320 });
-    await waitFor(() => expect(parseFloat(floatStyle().width)).not.toBe(winW0));
-    // 画布冻结：尺寸与 transform 都不变
-    expect(v.style.width).toBe(frozen.w);
-    expect(v.style.height).toBe(frozen.h);
-    expect(v.style.transform).toBe(frozen.t);
-  });
-
-  it('双击标题栏 → 恢复默认位置与尺寸', async () => {
-    const fake = makeFakeStream();
-    stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
-    await connect(fake);
-    const def = { left: floatStyle().left, top: floatStyle().top, w: floatStyle().width, h: floatStyle().height };
-    gesture(document.querySelector('.mirror-head')!, { x: 400, y: 300 }, { x: 200, y: 200 });
-    await waitFor(() => expect(floatStyle().left).not.toBe(def.left));
-    fireEvent.dblClick(document.querySelector('.mirror-head')!);
-    await waitFor(() => expect(floatStyle().left).toBe(def.left));
-    expect(floatStyle().top).toBe(def.top);
-    expect(floatStyle().width).toBe(def.w);
-    expect(floatStyle().height).toBe(def.h);
+    // Harness 未传 headDraggable（直挂场景不参与排序）：head 不可拖
+    expect(document.querySelector('.mirror-head')!.getAttribute('draggable')).toBeNull();
+    expect(document.querySelector('.mirror-video-box')!.getAttribute('draggable')).toBeNull();
+    cleanup();
+    // 列表内场景（headDraggable=true）：仅 head 成为拖拽源
+    render(
+      <MirrorRow
+        stream={fake.stream as unknown as MediaStream}
+        onStop={() => {}}
+        headDraggable
+        onHeadDragStart={() => {}}
+        onHeadDragEnd={() => {}}
+      />,
+    );
+    expect(document.querySelector('.mirror-head')!.getAttribute('draggable')).toBe('true');
+    expect(document.querySelector('.mirror-video-box')!.getAttribute('draggable')).toBeNull();
+    expect(document.querySelector('video.mirror-video')!.getAttribute('draggable')).toBeNull();
   });
 
   it('滚轮上滚 → 画面放大（scale > 1）', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
+    renderHarness();
     const v = await connect(fake);
     await stubStage(400, 800);
     fireEvent.wheel(boxEl(), { deltaY: -100, clientX: 100, clientY: 100 });
@@ -218,7 +200,7 @@ describe('IPhoneMirrorCard', () => {
   it('滚轮连续缩放 → 放大无上限，缩小 clamp 在 1x', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
+    renderHarness();
     const v = await connect(fake);
     await stubStage(400, 800);
     const box = boxEl();
@@ -231,7 +213,7 @@ describe('IPhoneMirrorCard', () => {
   it('同一光标连续放大 → 锚点严格不动（无 clamp 干扰的宽视口）', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
+    renderHarness();
     const v = await connect(fake);
     // 宽视口：4 次放大后内容仍远小于视口，clamp 不介入，验证纯锚点数学
     await stubStage(800, 800);
@@ -251,12 +233,11 @@ describe('IPhoneMirrorCard', () => {
   it('放大后拖动画面 → 平移查看局部区域', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
+    renderHarness();
     const v = await connect(fake);
     await stubStage(400, 800);
     const box = boxEl();
     for (let i = 0; i < 15; i++) fireEvent.wheel(box, { deltaY: -100, clientX: 200, clientY: 400 });
-    await waitFor(() => expect(viewOf(v).s).toBeGreaterThanOrEqual(2));
     const before = v.style.transform;
     gesture(box, { x: 200, y: 400 }, { x: 240, y: 420 });
     await waitFor(() => expect(v.style.transform).not.toBe(before));
@@ -265,7 +246,7 @@ describe('IPhoneMirrorCard', () => {
   it('双击画面 → 复位缩放（1x 居中）', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
+    renderHarness();
     const v = await connect(fake);
     await stubStage(400, 800);
     const box = boxEl();
@@ -279,32 +260,58 @@ describe('IPhoneMirrorCard', () => {
     expect(tx).toBeCloseTo((400 - cw) / 2, 1);
   });
 
-  it('透明度：◐ 按钮展开 1-100 滑杆，拖动实时调节', async () => {
+  it('透明度：◐ 按钮展开 1-100 滑杆，拖动实时调节（仅画面，卡片框架不受影响）', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
-    await connect(fake);
-    const floatEl = document.querySelector('.mirror-float') as HTMLElement;
+    renderHarness();
+    const v = await connect(fake);
+    const cardEl = document.querySelector('.mirror-row-card') as HTMLElement;
     // 默认 100%
-    expect(floatEl.style.opacity).toBe('1');
+    expect(v.style.opacity).toBe('1');
+    // 透明度只作用于画面：卡片容器不设 opacity
+    expect(cardEl.style.opacity).toBe('');
     // 点 ◐ 展开滑杆面板
     screen.getByRole('button', { name: /◐/ }).click();
     const slider = await screen.findByRole('slider');
     expect(slider).toHaveAttribute('min', '1');
     expect(slider).toHaveAttribute('max', '100');
-    // 拖动滑杆到 35 → opacity 0.35，按钮显示 35%
+    // 拖动滑杆到 35 → 画面 opacity 0.35，按钮显示 35%
     fireEvent.change(slider, { target: { value: '35' } });
-    await waitFor(() => expect(floatEl.style.opacity).toBe('0.35'));
+    await waitFor(() => expect(v.style.opacity).toBe('0.35'));
     expect(screen.getByRole('button', { name: /◐/ }).textContent).toBe('◐ 35%');
     // 调到下限 1
     fireEvent.change(slider, { target: { value: '1' } });
-    await waitFor(() => expect(floatEl.style.opacity).toBe('0.01'));
+    await waitFor(() => expect(v.style.opacity).toBe('0.01'));
+  });
+
+  it('iPhone 旋转（流分辨率互换）→ 画布按新比例重排并复位视图，不冻结竖屏', async () => {
+    const fake = makeFakeStream();
+    stubGetDisplayMedia(() => Promise.resolve(fake.stream));
+    renderHarness();
+    const v = await connect(fake);
+    await stubStage(400, 800); // 竖屏 318×701 → contain fit: 362.9×800
+    expect(parseFloat(v.style.height)).toBeGreaterThan(parseFloat(v.style.width));
+    // 旋转：分辨率互换，video 触发 resize（不会重发 loadedmetadata）
+    Object.defineProperty(v, 'videoWidth', { value: 701, configurable: true });
+    Object.defineProperty(v, 'videoHeight', { value: 318, configurable: true });
+    v.dispatchEvent(new Event('resize'));
+    // 横屏 701×318 → contain fit: 400×181.5
+    await waitFor(() => {
+      expect(parseFloat(v.style.width)).toBeGreaterThan(parseFloat(v.style.height));
+    });
+    expect(parseFloat(v.style.width)).toBeCloseTo(400, 1);
+    expect(parseFloat(v.style.height)).toBeCloseTo(400 / (701 / 318), 1);
+    // 视图复位：1x 居中
+    const { tx, ty, s } = viewOf(v);
+    expect(s).toBe(1);
+    expect(tx).toBeCloseTo((400 - parseFloat(v.style.width)) / 2, 1);
+    expect(ty).toBeCloseTo((800 - parseFloat(v.style.height)) / 2, 1);
   });
 
   it('透明度面板：再点 ◐ 或点面板外部 → 收起', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
+    renderHarness();
     await connect(fake);
     const btn = screen.getByRole('button', { name: /◐/ });
     btn.click();
@@ -316,23 +323,5 @@ describe('IPhoneMirrorCard', () => {
     await screen.findByRole('slider');
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     await waitFor(() => expect(screen.queryByRole('slider')).toBeNull());
-  });
-
-  it('点透明度按钮/拖动滑杆不触发窗口拖动', async () => {
-    const fake = makeFakeStream();
-    stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    renderCard();
-    await connect(fake);
-    const before = floatStyle().left;
-    // 在透明度按钮上做完整拖动手势（若误触发拖动，窗口会移走）
-    gesture(screen.getByRole('button', { name: /◐/ }), { x: 500, y: 40 }, { x: 400, y: 40 });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(floatStyle().left).toBe(before);
-    // 展开面板后在滑杆上拖动也不触发窗口拖动
-    screen.getByRole('button', { name: /◐/ }).click();
-    const slider = await screen.findByRole('slider');
-    gesture(slider, { x: 500, y: 40 }, { x: 400, y: 40 });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(floatStyle().left).toBe(before);
   });
 });

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { WsClient } from './ws-client.js';
 import { useSessions } from './use-sessions.js';
+import { useMirrorStream } from './use-mirror-stream.js';
 import { SessionList } from './components/session-list.js';
-import { IPhoneMirrorCard, MIRROR_BAR_H } from './components/iphone-mirror-card.js';
+import { MirrorBar, MIRROR_BAR_H } from './components/iphone-mirror-card.js';
 import { MainTerminal, type MainTerminalHandle } from './components/main-terminal.js';
 import { QuickInput } from './components/quick-input.js';
 import { RecordView } from './components/record-view.js';
@@ -29,6 +30,13 @@ export function App() {
   const [recordViewId, setRecordViewId] = useState<string | null>(null);
   const [showAnalyze, setShowAnalyze] = useState(false);
   const [transcriptCwd, setTranscriptCwd] = useState<string | null>(null);
+  // iPhone 镜像：流生命周期在列表外（hook），mirrorIndex 为镜像卡在渲染序列中的位置。
+  // 不持久化：刷新后回列表底部
+  const mirror = useMirrorStream();
+  const [mirrorIndex, setMirrorIndex] = useState<number | null>(null);
+  const startMirror = async () => {
+    if (await mirror.start()) setMirrorIndex(sessions.length);
+  };
 
   useEffect(() => {
     // 连接打开后再 list，避免连接未就绪时发送被丢弃；刷新 / 断线重连后恢复会话与历史
@@ -50,9 +58,13 @@ export function App() {
           onClose={close}
           onShowRecord={setRecordViewId}
           onReorder={reorder}
-          bottomOffset={MIRROR_BAR_H}
+          mirrorStream={mirror.stream}
+          mirrorIndex={mirrorIndex}
+          onMoveMirror={setMirrorIndex}
+          onStopMirror={mirror.stop}
+          bottomOffset={mirror.stream ? 0 : MIRROR_BAR_H}
         />
-        <IPhoneMirrorCard />
+        {mirror.stream === null && <MirrorBar onStart={startMirror} />}
       </aside>
       <main className="main">
         {showAnalyze ? (
