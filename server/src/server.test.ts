@@ -1,4 +1,6 @@
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, vi, afterAll } from 'vitest';
+import { swipeUpOnMirror } from './mirror-control.js';
+vi.mock('./mirror-control.js', () => ({ swipeUpOnMirror: vi.fn() }));
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -76,5 +78,20 @@ describe('server integration', () => {
       method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(['x']),
     });
     expect(r.status).toBe(200);
+  });
+
+  it('POST /api/mirror/swipe-up → 调 swipeUpOnMirror 并回 ok(路由在代理前)', async () => {
+    vi.mocked(swipeUpOnMirror).mockResolvedValueOnce({ ok: true });
+    const r = await fetch(`http://localhost:${port}/api/mirror/swipe-up`, { method: 'POST' });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ ok: true });
+    expect(swipeUpOnMirror).toHaveBeenCalledTimes(1);
+  });
+
+  it('POST /api/mirror/swipe-up 注入失败 → 200 + {ok:false, reason}', async () => {
+    vi.mocked(swipeUpOnMirror).mockResolvedValueOnce({ ok: false, reason: 'window-not-found' });
+    const r = await fetch(`http://localhost:${port}/api/mirror/swipe-up`, { method: 'POST' });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ ok: false, reason: 'window-not-found' });
   });
 });

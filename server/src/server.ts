@@ -8,6 +8,7 @@ import { handleConnection } from './ws-handler.js';
 import type { CmdCtx } from './ws-handler.js';
 import { hasTmux } from './tmux.js';
 import { handleProxy } from './record-proxy.js';
+import { swipeUpOnMirror } from './mirror-control.js';
 import { countRecords, listRecords, getRecord } from './record-store.js';
 import { readQuickCommands, writeQuickCommands } from './quick-commands.js';
 import { remove, prune } from './command-history.js';
@@ -113,7 +114,7 @@ export async function createServer(opts: {
         return json(200, { raw: mgr.getRawTail(hm[1]) });
       }
     }
-    // ── analyze 路由必须在 handleProxy 之前，否则 POST 会被代理吞掉 ──
+    // ── analyze/mirror 路由必须在 handleProxy 之前，否则 POST 会被代理吞掉 ──
     if (method === 'GET' && url.startsWith('/api/analyze/harness')) {
       const u = new URL(url, 'http://localhost');
       const json = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
@@ -146,6 +147,13 @@ export async function createServer(opts: {
             json(200, { error: isNoKey ? 'no_analyzer_key' : 'interpret_failed', message: isNoKey ? undefined : msg, fallbackPrompt: buildInterpretPrompt(profile) });
           });
       });
+      return;
+    }
+    if (url === '/api/mirror/swipe-up' && method === 'POST') {
+      const json = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
+      swipeUpOnMirror()
+        .then((r) => json(200, r))
+        .catch((e: unknown) => json(200, { ok: false, reason: 'inject-failed', detail: e instanceof Error ? e.message.slice(0, 200) : String(e) }));
       return;
     }
     if (method !== 'GET') {
