@@ -18,8 +18,8 @@ const ASC_PREP = [
   '  set prevFront to name of first application process whose frontmost is true',
   `  tell process "${MIRROR_PROCESS}"`,
   '    set maxA to 0',
-  '    set bx to 0',
-  '    set by to 0',
+  '    set wx to 0',
+  '    set wy to 0',  // 注意:AppleScript 保留字不可用作变量名(by 撞保留字 → 语法错误)
   '    set bw to 0',
   '    set bh to 0',
   '    repeat with w in windows',
@@ -27,8 +27,8 @@ const ASC_PREP = [
   '      set {ww, hh} to size of w',
   '      if ww * hh > maxA then',
   '        set maxA to ww * hh',
-  '        set bx to x',
-  '        set by to y',
+  '        set wx to x',
+  '        set wy to y',
   '        set bw to ww',
   '        set bh to hh',
   '      end if',
@@ -37,7 +37,7 @@ const ASC_PREP = [
   '  if bw < 50 or bh < 50 then return "ERR|window-not-found"',
   `  set frontmost of process "${MIRROR_PROCESS}" to true`,
   '  delay 0.25',
-  '  return prevFront & "|" & (bx as text) & "," & (by as text) & "," & (bw as text) & "," & (bh as text)',
+  '  return prevFront & "|" & (wx as text) & "," & (wy as text) & "," & (bw as text) & "," & (bh as text)',
   'end tell',
 ].join('\n');
 
