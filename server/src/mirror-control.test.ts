@@ -1,16 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// mock child_process.execFile:结果按队列顺序出队;记录调用序列供断言。
+// mock child_process.execFile:结果按队列顺序出队(可带 delay 门控);记录调用序列供断言。
 // 必须 callback 风格:util.promisify 只认 callback,忽略 mock 返回的 Promise
 // (返回 Promise 会被丢弃 → promisify 自建 Promise 永远 pending → 超时)
 const calls: { cmd: string; args: string[] }[] = [];
-const results: { stdout?: string; reject?: Error }[] = [];
+const results: { stdout?: string; reject?: Error; delay?: Promise<void> }[] = [];
 vi.mock('node:child_process', () => ({ execFile: (...a: unknown[]) => {
   const cb = a[a.length - 1] as (err: Error | null, res: { stdout: string; stderr: string }) => void;
   calls.push({ cmd: a[0] as string, args: a[1] as string[] });
   const r = results.shift() ?? { stdout: '' };
-  if (r.reject) cb(r.reject, { stdout: '', stderr: '' });
-  else cb(null, { stdout: r.stdout ?? '', stderr: '' });
+  const done = () => {
+    if (r.reject) cb(r.reject, { stdout: '', stderr: '' });
+    else cb(null, { stdout: r.stdout ?? '', stderr: '' });
+  };
+  if (r.delay) r.delay.then(done);
+  else done();
 } }));
 
 import { swipeUpOnMirror, MIRROR_PROCESS } from './mirror-control.js';
@@ -63,5 +67,18 @@ describe('swipeUpOnMirror', () => {
     results.push({ stdout: 'garbage' });
     const r = await swipeUpOnMirror();
     expect(r).toMatchObject({ ok: false, reason: 'inject-failed' });
+  });
+
+  it('在飞互斥:链路未完成时再次调用立即 busy,不并发执行(防焦点竞态)', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    results.push({ stdout: 'Safari|1136,640,671,348', delay: gate }, { stdout: 'OK' }, { stdout: '' });
+    const p1 = swipeUpOnMirror();
+    await Promise.resolve();  // 让 p1 走到 prep 挂起点
+    const r2 = await swipeUpOnMirror();  // 链路在飞中
+    expect(r2).toEqual({ ok: false, reason: 'busy' });
+    release();
+    expect(await p1).toEqual({ ok: true });
+    expect(calls).toHaveLength(3);  // busy 短路,没有第二串 execFile
   });
 });

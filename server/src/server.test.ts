@@ -94,4 +94,22 @@ describe('server integration', () => {
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ ok: false, reason: 'window-not-found' });
   });
+
+  it('POST /api/mirror/swipe-up 跨源 Origin → 403 且不注入(防 drive-by,简单请求无预检)', async () => {
+    const callsBefore = vi.mocked(swipeUpOnMirror).mock.calls.length;
+    const r = await fetch(`http://localhost:${port}/api/mirror/swipe-up`, {
+      method: 'POST', headers: { origin: 'https://evil.example' },
+    });
+    expect(r.status).toBe(403);
+    expect(vi.mocked(swipeUpOnMirror).mock.calls.length).toBe(callsBefore);  // 本用例零新增
+  });
+
+  it('POST /api/mirror/swipe-up 同源 Origin → 放行(局域网 IP 访问场景)', async () => {
+    vi.mocked(swipeUpOnMirror).mockResolvedValueOnce({ ok: true });
+    const r = await fetch(`http://localhost:${port}/api/mirror/swipe-up`, {
+      method: 'POST', headers: { origin: `http://localhost:${port}` },
+    });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ ok: true });
+  });
 });

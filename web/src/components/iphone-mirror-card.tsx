@@ -81,6 +81,7 @@ export function MirrorRow({ stream, onStop, headDraggable, onHeadDragStart, onHe
       .then((r) => r.json() as Promise<{ ok: boolean; reason?: string }>)
       .then((d) => {
         if (d.ok) return;
+        if (d.reason === 'busy') return;  // 连划时的并发拒绝:静默,不打扰
         flashError(d.reason === 'window-not-found' ? '未找到 iPhone 镜像窗口' : '注入失败:检查辅助功能授权');
       })
       .catch(() => flashError('透传服务不可达'));
@@ -150,7 +151,7 @@ export function MirrorRow({ stream, onStop, headDraggable, onHeadDragStart, onHe
         if (now < s.cooldownUntil) return;
         if (now - s.last > SWIPE_RESET_GAP_MS) s.acc = 0;
         s.last = now;
-        s.acc += e.deltaY;
+        s.acc += SWIPE_UP_DELTA_SIGN * e.deltaY;  // 带符号累计:翻转 SIGN 时方向语义才对称
         if (s.acc >= SWIPE_TRIGGER_DELTA) {
           s.acc = 0;
           s.cooldownUntil = now + SWIPE_COOLDOWN_MS;

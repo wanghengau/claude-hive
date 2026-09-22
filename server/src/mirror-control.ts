@@ -8,7 +8,7 @@ export const MIRROR_PROCESS = 'iPhone Mirroring';
 
 export type SwipeResult =
   | { ok: true }
-  | { ok: false; reason: 'window-not-found' | 'inject-failed'; detail?: string };
+  | { ok: false; reason: 'window-not-found' | 'inject-failed' | 'busy'; detail?: string };
 
 // ① AppleScript:读当前焦点进程 + 镜像主窗口(面积最大者,过滤 66×20 悬浮小条)几何,
 //   并把镜像提为 frontmost——被遮挡时 CGEvent 会被前方窗口吃掉(spike 实测)。
@@ -69,7 +69,14 @@ function run(argv) {
 const ascRestore = (proc: string) =>
   `tell application "System Events" to set frontmost of process "${proc.replace(/"/g, '\\"')}" to true`;
 
+// 在飞互斥:链路(提前焦点→注入→恢复)总时长 ~1s,长于前端 800ms 冷却;
+// 重叠的第二条链会在镜像仍 frontmost 时读到 prevFront="iPhone Mirroring",
+// 焦点被卡死在镜像窗口。在飞时直接 busy(多标签页同样被此收口)
+let inFlight = false;
+
 export async function swipeUpOnMirror(): Promise<SwipeResult> {
+  if (inFlight) return { ok: false, reason: 'busy' };
+  inFlight = true;
   let prevFront = '';
   try {
     const { stdout: prepOut } = await execFileP('osascript', ['-e', ASC_PREP]);
@@ -89,9 +96,14 @@ export async function swipeUpOnMirror(): Promise<SwipeResult> {
     }
     return { ok: false, reason: 'inject-failed', detail: msg.slice(0, 200) };
   } finally {
-    // 提前过焦点就要恢复(对称);prep 未成功(没抢焦点)时 prevFront 为空跳过
-    if (prevFront) {
-      try { await execFileP('osascript', ['-e', ascRestore(prevFront)]); } catch { /* 恢复失败不影响注入结果 */ }
+    // 提前过焦点就要恢复(对称);prep 未成功(没抢焦点)时 prevFront 为空跳过。
+    // 互斥在整条链(含恢复)完成后才放开
+    try {
+      if (prevFront) {
+        try { await execFileP('osascript', ['-e', ascRestore(prevFront)]); } catch { /* 恢复失败不影响注入结果 */ }
+      }
+    } finally {
+      inFlight = false;
     }
   }
 }

@@ -402,4 +402,16 @@ describe('MirrorBar / MirrorRow / useMirrorStream', () => {
       expect(document.querySelector('.mirror-err')).toBeNull();  // 2s 后淡出
     } finally { vi.useRealTimers(); }
   });
+
+  it('在飞 busy → 静默(连划时并发拒绝不打扰用户)', async () => {
+    const fake = makeFakeStream();
+    stubGetDisplayMedia(() => Promise.resolve(fake.stream));
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ ok: false, reason: 'busy' }) })));
+    renderHarness();
+    await connect(fake);
+    await stubStage(400, 800);
+    for (let i = 0; i < 3; i++) ctrlSwipe(boxEl());
+    for (let i = 0; i < 5; i++) await Promise.resolve();  // flush fetch 两层 .then 微任务
+    expect(document.querySelector('.mirror-err')).toBeNull();  // busy 不显示错误
+  });
 });

@@ -151,6 +151,15 @@ export async function createServer(opts: {
     }
     if (url === '/api/mirror/swipe-up' && method === 'POST') {
       const json = (code: number, data: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(data)); };
+      // drive-by 防线:本端点有物理副作用(焦点窃取+事件注入),且 POST 属 CORS 简单请求
+      // 无预检——恶意网页可盲发。带 Origin 头时须与 Host 同源(局域网 IP 访问不受影响),
+      // 无 Origin(本机 curl/node)放行
+      const origin = req.headers.origin;
+      if (origin) {
+        let sameOrigin = false;
+        try { sameOrigin = new URL(origin).host === req.headers.host; } catch { /* 非法 Origin */ }
+        if (!sameOrigin) return json(403, { ok: false, reason: 'inject-failed', detail: 'cross-origin' });
+      }
       swipeUpOnMirror()
         .then((r) => json(200, r))
         .catch((e: unknown) => json(200, { ok: false, reason: 'inject-failed', detail: e instanceof Error ? e.message.slice(0, 200) : String(e) }));
