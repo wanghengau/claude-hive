@@ -333,7 +333,8 @@ describe('MirrorBar / MirrorRow / useMirrorStream', () => {
   it('⌃+上划累计过阈值 → fetch 透传一次;冷却窗内 momentum 连发不重复触发', async () => {
     const fake = makeFakeStream();
     stubGetDisplayMedia(() => Promise.resolve(fake.stream));
-    const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ ok: true }) }));
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+      Promise.resolve({ json: () => Promise.resolve({ ok: true }) }));
     vi.stubGlobal('fetch', fetchMock);
     renderHarness();
     await connect(fake);
@@ -343,8 +344,9 @@ describe('MirrorBar / MirrorRow / useMirrorStream', () => {
     try {
       for (let i = 0; i < 3; i++) ctrlSwipe(boxEl());          // 累计 180 ≥ 120 → 触发 1 次
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(fetchMock.mock.calls[0][0]).toBe('/api/mirror/swipe-up');
-      expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+      const [pInput, pInit] = fetchMock.mock.calls[0];
+      expect(pInput).toBe('/api/mirror/swipe-up');
+      expect((pInit as RequestInit).method).toBe('POST');
       const s0 = viewOf(v).s;
       for (let i = 0; i < 30; i++) ctrlSwipe(boxEl());         // 冷却内连发
       expect(fetchMock).toHaveBeenCalledTimes(1);               // 仍 1 次
