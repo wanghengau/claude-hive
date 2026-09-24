@@ -15,7 +15,8 @@ export interface IPtyManager {
   resize(sessionId: string, cols: number, rows: number): void;
   close(sessionId: string): void;
   list(): SessionInfo[];
-  getRingBuffer(sessionId: string): string;
+  // pane 原始流尾部（pipe-pane 导出，连接时回放给前端，与真终端收到的字节一致）
+  getRawTail(sessionId: string): string;
   getCwd(sessionId: string): string;
   onData(h: DataHandler): () => void;
   onExit(h: ExitHandler): () => void;
@@ -27,7 +28,8 @@ export type ClientMessage =
   | { type: 'input'; sessionId: string; data: string }
   | { type: 'resize'; sessionId: string; cols: number; rows: number }
   | { type: 'close'; sessionId: string }
-  | { type: 'list' };
+  | { type: 'list' }
+  | { type: 'paste-image'; sessionId: string; data: string; mimeType: string };
 
 export type ServerMessage =
   | { type: 'created'; sessionId: string }
@@ -35,4 +37,6 @@ export type ServerMessage =
   | { type: 'exit'; sessionId: string; code: number }
   | { type: 'sessions'; items: SessionInfo[] }
   | { type: 'cwd'; sessionId: string; cwd: string }
-  | { type: 'commands'; sessionId: string; items: string[] };
+  | { type: 'commands'; sessionId: string; items: string[] }
+  | { type: 'image-pasted'; sessionId: string; path: string }
+  | { type: 'error'; sessionId: string; message: string };

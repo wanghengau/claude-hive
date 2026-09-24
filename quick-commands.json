@@ -1,8 +1,14 @@
 [
-  "/rewind",
   "/clear",
+  "/rewind",
+  "claude",
+  "/model glm-5.3",
+  "/model glm-5.3[1m]",
+  "sh switch_model.sh doubao",
+  "sh switch_model.sh zhipu",
+  "sh switch_model.sh kimi",
+  "cd ~/.claude",
   "claude-record",
   "cd /Users/Shared/workspace/allmeta/ontoflow/",
-  "/model qwen3.7-plus",
-  "/model glm-5.1[1m]"
+  "cd /Users/Shared/workspace/expense-control"
 ]

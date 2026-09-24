@@ -11,3 +11,8 @@ run/
 # 微信截图（含 EXIF 元数据，不适合开源）
 微信截图*.png
 WeChat*.png
+
+# e2e 验证截图 / playwright MCP 产物 / 离线打包产物
+/*.png
+*.tar.gz
+.playwright-mcp/

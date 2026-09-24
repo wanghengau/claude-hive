@@ -1,11 +1,60 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { execFile } from 'node:child_process';
 import { PtyManager } from './pty-manager.js';
 import * as tmux from './tmux.js';
 
-async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
+
+// 查询 tmux pane 的滚动位置（copy-mode 下非空）
+function scrollPos(socket: string, id: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile('tmux', ['-L', socket, '-f', '/dev/null', 'display-message', '-p', '-t', id, '#{scroll_position}'],
+      (e, stdout) => resolve((stdout ?? '').trim()));
+  });
+}
+
+// 查询 tmux pane 的历史行数。注意不能用 attach 流包含 "500" 判断命令执行完：
+// 输入回显里就含 "500"（zsh 未就绪时 tty ECHO 先回显、ZLE 起 raw 模式后丢弃输入队列），
+// 而 tmux 的 history_size 才是"命令真执行了、输出滚入历史"的权威信号。
+function historySize(socket: string, id: string): Promise<number> {
+  return new Promise((resolve) => {
+    execFile('tmux', ['-L', socket, '-f', '/dev/null', 'display-message', '-p', '-t', id, '#{history_size}'],
+      (e, stdout) => resolve(Number((stdout ?? '').trim()) || 0));
+  });
+}
+
+// pane 是否处于 alternate screen
+function altFlag(socket: string, id: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile('tmux', ['-L', socket, '-f', '/dev/null', 'display-message', '-p', '-t', id, '#{alternate_on}'],
+      (e, stdout) => resolve((stdout ?? '').trim() === '1'));
+  });
+}
+
+// pane 是否处于 copy-mode 等 mode
+function modeFlag(socket: string, id: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile('tmux', ['-L', socket, '-f', '/dev/null', 'display-message', '-p', '-t', id, '#{pane_in_mode}'],
+      (e, stdout) => resolve((stdout ?? '').trim()));
+  });
+}
+
+// pane 当前屏首行文本
+function paneFirstLine(socket: string, id: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile('tmux', ['-L', socket, '-f', '/dev/null', 'capture-pane', '-t', id, '-p'],
+      (e, stdout) => resolve(((stdout ?? '').split('\n')[0] || '').trim()));
+  });
+}
+
+// 往会话敲一条命令（须在 waitShellReady 之后）
+function execWrite(mgr: PtyManager, id: string, cmd: string): void {
+  mgr.write(id, cmd + '\n');
+}
+
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 5000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (predicate()) return;
+    if (await predicate()) return;
     await new Promise((r) => setTimeout(r, 50));
   }
   throw new Error('waitFor timeout');
@@ -38,7 +87,7 @@ describe('PtyManager (tmux 后端)', () => {
     mgr.write(id, 'echo MARKER_42\n');
     await waitFor(() => out.includes('MARKER_42'));
     expect(out).toContain('MARKER_42');
-    expect(mgr.getRingBuffer(id)).toContain('MARKER_42');
+    expect(mgr.getRawTail(id)).toContain('MARKER_42');
   });
 });
 
@@ -98,6 +147,7 @@ describe('PtyManager resize/close/exit', () => {
   });
 });
 
+
 describe('PtyManager 启动恢复', () => {
   it('新实例同 socket 恢复已存在的会话（含输出交互与 cwd）', async () => {
     const socket = 'wmt-test-' + Math.random().toString(36).slice(2, 8);
@@ -114,9 +164,8 @@ describe('PtyManager 启动恢复', () => {
     const mgr2 = new PtyManager({ socketName: socket });
     await waitFor(() => mgr2.list().some((s) => s.sessionId === id), 8000);
     expect(mgr2.list().some((s) => s.sessionId === id)).toBe(true);
-    // 重新 attach 后 ring 应含历史输出：capture-pane 主动取回 scrollback，
-    // 否则 attach 只给当前 viewport 一屏，RESTOREMARK（已滚进 scrollback）拿不回来
-    expect(mgr2.getRingBuffer(id)).toContain('RESTOREMARK');
+    // 重新 attach 后 raw 文件应含历史输出（pipe-pane append 续写同一文件）
+    expect(mgr2.getRawTail(id)).toContain('RESTOREMARK');
     // macOS /tmp → /private/tmp，用结尾匹配
     await waitFor(() => /\/tmp$/.test(mgr2.getCwd(id)));
     mgr2.dispose();

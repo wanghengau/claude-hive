@@ -1,5 +1,6 @@
 import type { ClientMessage, IPtyManager, ServerMessage } from './protocol.js';
 import { parseChunk, appendTruncated, save, load } from './command-history.js';
+import { saveImage } from './paste-store.js';
 
 export interface WSLike {
   send(data: string): void;
@@ -21,7 +22,7 @@ type Broadcast = (msg: ServerMessage) => void;
 
 const MAX_HISTORY = 50;
 
-export function handleConnection(ws: WSLike, mgr: IPtyManager, cmdCtx: CmdCtx, broadcast: Broadcast): void {
+export async function handleConnection(ws: WSLike, mgr: IPtyManager, cmdCtx: CmdCtx, broadcast: Broadcast): Promise<void> {
   const send = (m: ServerMessage) => ws.send(JSON.stringify(m));
 
   const offData = mgr.onData((sessionId, data) => send({ type: 'data', sessionId, payload: data }));
@@ -40,7 +41,7 @@ export function handleConnection(ws: WSLike, mgr: IPtyManager, cmdCtx: CmdCtx, b
     }
   };
 
-  ws.on('message', (raw: string) => {
+  ws.on('message', async (raw: string) => {
     let msg: ClientMessage;
     try {
       msg = JSON.parse(raw) as ClientMessage;
@@ -63,11 +64,21 @@ export function handleConnection(ws: WSLike, mgr: IPtyManager, cmdCtx: CmdCtx, b
       case 'close':
         mgr.close(msg.sessionId);
         break;
+      case 'paste-image': {
+        try {
+          const filePath = await saveImage(msg.sessionId, msg.data, msg.mimeType);
+          send({ type: 'image-pasted', sessionId: msg.sessionId, path: filePath });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          send({ type: 'error', sessionId: msg.sessionId, message });
+        }
+        break;
+      }
       case 'list': {
         const items = mgr.list();
         send({ type: 'sessions', items });
         for (const info of items) {
-          const replay = mgr.getRingBuffer(info.sessionId);
+          const replay = mgr.getRawTail(info.sessionId);
           if (replay) send({ type: 'data', sessionId: info.sessionId, payload: replay });
           const cwd = mgr.getCwd(info.sessionId);
           if (cwd) send({ type: 'cwd', sessionId: info.sessionId, cwd });

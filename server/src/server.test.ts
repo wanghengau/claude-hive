@@ -1,4 +1,6 @@
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, vi, afterAll } from 'vitest';
+import { swipeUpOnMirror } from './mirror-control.js';
+vi.mock('./mirror-control.js', () => ({ swipeUpOnMirror: vi.fn() }));
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -76,5 +78,38 @@ describe('server integration', () => {
       method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(['x']),
     });
     expect(r.status).toBe(200);
+  });
+
+  it('POST /api/mirror/swipe-up → 调 swipeUpOnMirror 并回 ok(路由在代理前)', async () => {
+    vi.mocked(swipeUpOnMirror).mockResolvedValueOnce({ ok: true });
+    const r = await fetch(`http://localhost:${port}/api/mirror/swipe-up`, { method: 'POST' });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ ok: true });
+    expect(swipeUpOnMirror).toHaveBeenCalledTimes(1);
+  });
+
+  it('POST /api/mirror/swipe-up 注入失败 → 200 + {ok:false, reason}', async () => {
+    vi.mocked(swipeUpOnMirror).mockResolvedValueOnce({ ok: false, reason: 'window-not-found' });
+    const r = await fetch(`http://localhost:${port}/api/mirror/swipe-up`, { method: 'POST' });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ ok: false, reason: 'window-not-found' });
+  });
+
+  it('POST /api/mirror/swipe-up 跨源 Origin → 403 且不注入(防 drive-by,简单请求无预检)', async () => {
+    const callsBefore = vi.mocked(swipeUpOnMirror).mock.calls.length;
+    const r = await fetch(`http://localhost:${port}/api/mirror/swipe-up`, {
+      method: 'POST', headers: { origin: 'https://evil.example' },
+    });
+    expect(r.status).toBe(403);
+    expect(vi.mocked(swipeUpOnMirror).mock.calls.length).toBe(callsBefore);  // 本用例零新增
+  });
+
+  it('POST /api/mirror/swipe-up 同源 Origin → 放行(局域网 IP 访问场景)', async () => {
+    vi.mocked(swipeUpOnMirror).mockResolvedValueOnce({ ok: true });
+    const r = await fetch(`http://localhost:${port}/api/mirror/swipe-up`, {
+      method: 'POST', headers: { origin: `http://localhost:${port}` },
+    });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ ok: true });
   });
 });

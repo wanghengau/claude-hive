@@ -158,8 +158,9 @@ body {
   box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-md), var(--accent-glow);
 }
 .row.exited .row-inputs { opacity: 0.5; }
-.row.dragging { opacity: 0.4; }
-.row.drop-target { border-color: var(--accent); border-style: dashed; }
+/* 拖拽反馈通用类（会话行与镜像行共用） */
+.dragging { opacity: 0.4; }
+.drop-target { border-color: var(--accent); border-style: dashed; }
 
 .row-head {
   display: flex;
@@ -565,3 +566,218 @@ details > summary::before {
 }
 details[open] > summary::before { transform: rotate(90deg); }
 details[open] > summary { border-bottom: 1px solid var(--border); }
+
+/* ── analyze-view（harness 结构分析）── */
+.brand-analyze { margin-left: 6px; padding: 2px 8px; font-size: 12px; background: var(--bg-elev); color: var(--text-dim); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.brand-analyze:hover { color: var(--accent); border-color: var(--accent-line); }
+.analyze-view { display: flex; flex-direction: column; height: 100%; }
+.az-bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+.az-back { background: none; border: none; color: var(--text-dim); cursor: pointer; font-family: var(--sans); }
+.az-back:hover { color: var(--accent); }
+.az-title { font-weight: 600; color: var(--text); }
+.az-sub { color: var(--text-faint); font-size: 12px; }
+.az-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.az-card { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.az-card h3 { font-size: 13px; color: var(--accent); margin-bottom: 10px; }
+.az-identity { color: var(--blue); margin-bottom: 8px; }
+.az-pre { background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; overflow-x: auto; color: var(--text-dim); font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.az-tools { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
+.az-tools li { display: flex; justify-content: space-between; padding: 4px 8px; background: var(--bg-input); border-radius: var(--radius-sm); }
+.az-tool-name { color: var(--blue); }
+.az-tool-tok { color: var(--text-faint); font-size: 11px; }
+.az-kv-grid .az-kv { display: flex; flex-direction: column; }
+.az-kv span { color: var(--text-faint); font-size: 11px; }
+.az-kv b { color: var(--text); font-size: 16px; }
+.az-kv-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.az-inj { margin-bottom: 8px; }
+.az-inj span { color: var(--purple); font-size: 11px; }
+.az-models { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.az-models li { display: flex; justify-content: space-between; padding: 2px 0; }
+.az-models span { color: var(--text-dim); }
+.az-models b { color: var(--accent); }
+.az-gen { padding: 8px 16px; background: var(--accent); color: var(--accent-ink); border: none; border-radius: var(--radius-sm); cursor: pointer; font-family: var(--sans); font-weight: 600; }
+.az-gen:hover:not(:disabled) { background: var(--accent-hover); }
+.az-gen:disabled { opacity: 0.5; cursor: not-allowed; }
+.az-interp { margin-top: 12px; }
+.az-fallback { margin-top: 12px; }
+.az-fallback p { color: var(--amber); margin-bottom: 8px; }
+.az-fallback button { margin-bottom: 8px; padding: 4px 12px; background: var(--bg-elev); color: var(--text-dim); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.az-empty { color: var(--text-faint); font-style: italic; padding: 16px; }
+@media (max-width: 720px) { .az-kv-grid { grid-template-columns: repeat(3, 1fr); } }
+
+
+/* ── TranscriptView：claude 对话历史 ── */
+.tv { display: flex; flex-direction: column; height: 100%; background: var(--bg); color: var(--text); }
+.tv-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--bg-panel);
+  flex-shrink: 0;
+}
+.tv-back {
+  background: var(--bg-elev); border: 1px solid var(--border-strong); color: var(--text-dim);
+  padding: 6px 12px; border-radius: var(--radius-sm); cursor: pointer;
+  font-family: var(--mono); font-size: 12px; transition: all 0.15s var(--ease);
+}
+.tv-back:hover { color: var(--accent); border-color: var(--accent); }
+.tv-title { font-weight: 600; font-size: 14px; }
+.tv-cwd { color: var(--text-faint); font-family: var(--mono); font-size: 12px; }
+.tv-list { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.tv-item {
+  text-align: left; background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 16px; cursor: pointer;
+  transition: border-color 0.15s var(--ease);
+}
+.tv-item:hover { border-color: var(--accent); }
+.tv-item-preview { font-size: 13px; color: var(--text); line-height: 1.6; }
+.tv-item-meta { margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.tv-msgs { flex: 1; overflow: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+.tv-msg { max-width: 86%; border-radius: var(--radius); padding: 10px 14px; }
+.tv-msg.user { align-self: flex-end; background: var(--accent-soft); border: 1px solid var(--accent-line); }
+.tv-msg.assistant { align-self: flex-start; background: var(--bg-elev); border: 1px solid var(--border); }
+.tv-msg-meta { font-family: var(--mono); font-size: 11px; color: var(--text-faint); margin-bottom: 4px; }
+.tv-msg-body { font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+.tv-tool {
+  align-self: flex-start; max-width: 86%;
+  font-family: var(--mono); font-size: 11px;
+  color: var(--text-dim); background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 4px 10px; display: flex; gap: 8px; align-items: baseline;
+}
+.tv-tool-name { color: var(--blue); flex-shrink: 0; }
+.tv-tool-detail { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 520px; }
+.tv-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-faint); }
+.main-head .mh-transcript {
+  background: var(--bg-elev); border: 1px solid var(--border); color: var(--text-dim);
+  padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 12px; font-family: var(--mono); transition: all 0.15s var(--ease);
+}
+.main-head .mh-transcript:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ============ IPHONE MIRROR ============ */
+/* idle 态：侧栏底部连接按钮条（高度由组件 inline style 控制，MIRROR_BAR_H 单一来源） */
+.mirror-card {
+  flex-shrink: 0;
+  /* 下边距 26px 对齐列表原有底部余量（公式 80 - sidebar-head 54），卡片只额外占用自身高度 */
+  margin: 0 8px 26px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.mirror-connect {
+  width: 100%;
+  height: 100%;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.18s var(--ease);
+}
+.mirror-connect:hover { color: var(--text); background: var(--accent-soft); }
+
+/* streaming 态：会话列表中的镜像行卡片（高度 MIRROR_ROW_H，由 react-window 定行高）。
+   本体不带背景：画面透明时透出侧栏底色；标题栏背景由 .mirror-head 自持 */
+.mirror-row-card {
+  height: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.mirror-row-card:hover { border-color: var(--border-strong); }
+.mirror-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+  flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
+  /* 透明度滑杆面板 absolute 挂载的定位基准；缺失时面板会相对最近的 positioned
+     祖先定位而被卡片 overflow:hidden 裁剪，点击 ◐ 看似无反应 */
+  position: relative;
+  /* pointer 拖动手势期间禁止触摸滚动手势干扰 */
+  touch-action: none;
+}
+.mirror-live {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--red);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.mirror-live .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: pulse 1.6s ease-in-out infinite; }
+.mirror-title { flex: 1; font-size: 12px; color: var(--text-dim); }
+.mirror-err { font-size: 11px; color: var(--red); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mirror-stop {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.mirror-stop:hover { color: var(--red); }
+.mirror-opacity {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mirror-opacity:hover { color: var(--text); }
+/* ◐ 按钮下方展开的透明度滑杆面板（挂在标题栏内，absolute 定位） */
+.mirror-opacity-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  box-shadow: var(--shadow-md);
+  z-index: 10;
+  cursor: default;
+  touch-action: none;
+}
+.mirror-opacity-panel input[type='range'] {
+  width: 140px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  display: block;
+}
+.mirror-video {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  /* 画布尺寸由组件 inline style 给定（连接时 fit 一次后冻结），object-fit fill 铺满画布 */
+  object-fit: fill;
+}
+/* 视口层：随卡片空间变化的取景框，画布在其中平移/缩放、溢出裁切。
+   不带背景：画面透明度调低时直接透出卡片后内容 */
+.mirror-video-box {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  /* 画面层滚轮缩放 + 拖动平移（含黑边区域） */
+  cursor: zoom-in;
+  touch-action: none;
+}
